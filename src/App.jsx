@@ -236,7 +236,7 @@ const App = () => {
             </div>
           </div>
           <h2 className="text-2xl font-bold text-center text-gray-800 mb-2">Tabetai</h2>
-          <p className="text-center text-gray-500 mb-8">{isRegister ? 'Registrasi Akun Baru' : 'Masuk ke Aplikasi'}</p>
+          <p className="text-center text-gray-500 mb-8">{isRegister ? 'Registrasi Akun Baru' : 'Irasshaimase!'}</p>
 
           <div className="space-y-4">
             <div>
