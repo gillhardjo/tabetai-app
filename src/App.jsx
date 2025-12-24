@@ -427,7 +427,7 @@ const App = () => {
       <h2 className="text-2xl font-bold mb-8">Pembayaran QRIS</h2>
       <div className="bg-white p-6 rounded-3xl mb-8 w-full max-w-xs aspect-square flex items-center justify-center relative overflow-hidden">
         {/* UPDATED: Mengambil file qris.png dari folder public */}
-        <img src="/qris.png" alt="QRIS Code" className="w-full h-full object-contain" />
+        <img src="qris.png" alt="QRIS Code" className="w-full h-full object-contain" />
       </div>
       <p className="text-gray-400 mb-8 text-center max-w-xs">Scan QR code di atas menggunakan aplikasi E-Wallet pilihan Anda.</p>
       <button onClick={handleCheckout} className="w-full max-w-sm bg-red-500 hover:bg-red-600 text-white font-bold py-4 rounded-2xl transition-all active:scale-95 shadow-[0_0_20px_rgba(239,68,68,0.4)]">Bayar Sekarang</button>
