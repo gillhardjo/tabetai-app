@@ -236,7 +236,7 @@ const App = () => {
             </div>
           </div>
           <h2 className="text-2xl font-bold text-center text-gray-800 mb-2">Tabetai</h2>
-          <p className="text-center text-gray-500 mb-8">{isRegister ? 'Registrasi Akun Baru' : 'Irasshaimase!'}</p>
+          <p className="text-center text-gray-500 mb-8">{isRegister ? 'Registrasi Akun Baru' : 'Oishii Onigiri'}</p>
 
           <div className="space-y-4">
             <div>
@@ -363,8 +363,8 @@ const App = () => {
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <header className="bg-white p-4 shadow-sm flex justify-between items-center">
         <div>
-          <h1 className="text-xl font-bold text-gray-800">Halo, {currentUser.username}</h1>
-          <p className="text-xs text-gray-500">Mau makan apa hari ini?</p>
+          <h1 className="text-xl font-bold text-gray-800">{currentUser.username} -san, Irasshaimase!</h1>
+          <p className="text-xs text-gray-500">Kyou, nani tabetai?</p>
         </div>
         <button onClick={() => setCurrentScreen('login')} className="text-gray-400 hover:text-red-500"><LogOut size={20} /></button>
       </header>
