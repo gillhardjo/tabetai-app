@@ -38,6 +38,16 @@ const App = () => {
   // Helper Format Rupiah
   const formatRupiah = (num) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(num);
 
+  // Helper Gambar (DIPINDAHKAN KE SINI AGAR BISA DIAKSES SEMUA)
+  const getProductImage = (productName) => {
+    if (!productName) return '/logo.png';
+    const name = productName.toLowerCase();
+    if (name.includes('salmon')) return '/salmon.png';
+    if (name.includes('tuna')) return '/tuna.png';
+    if (name.includes('chicken')) return '/chicken.png';
+    return '/logo.png'; 
+  };
+
   // --- REALTIME LISTENERS (Jantung Aplikasi) ---
   useEffect(() => {
     // 1. Dengar perubahan Produk & Stok
@@ -268,15 +278,6 @@ const App = () => {
         const currentSelection = prev[id] || { variant: 'Original', note: '', qty: 1 };
         return { ...prev, [id]: { ...currentSelection, qty: Math.max(1, currentSelection.qty + delta) } };
       });
-    };
-
-    // Helper untuk menentukan gambar berdasarkan nama produk
-    const getProductImage = (productName) => {
-      const name = productName.toLowerCase();
-      if (name.includes('salmon')) return '/salmon.png';
-      if (name.includes('tuna')) return '/tuna.png';
-      if (name.includes('chicken')) return '/chicken.png';
-      return '/logo.png'; // Fallback ke logo jika nama tidak cocok
     };
 
     return (
