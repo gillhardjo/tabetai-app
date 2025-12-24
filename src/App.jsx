@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { 
   User, Lock, ShoppingBag, ChefHat, ArrowLeft, 
-  CreditCard, Clock, Package, LogOut, Plus, Minus, QrCode, Trash2 
+  CreditCard, Clock, Package, LogOut, Plus, Minus, QrCode, Trash2, Users, Pencil 
 } from 'lucide-react';
 
 // --- FIREBASE IMPORTS ---
 import { initializeApp } from "firebase/app";
 import { 
-  getFirestore, collection, addDoc, updateDoc, doc, 
+  getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, 
   onSnapshot, query, where, getDocs, setDoc 
 } from "firebase/firestore";
 
@@ -34,11 +34,12 @@ const App = () => {
   const [products, setProducts] = useState([]);
   const [orders, setOrders] = useState([]);
   const [cart, setCart] = useState([]);
+  const [usersList, setUsersList] = useState([]); 
 
   // Helper Format Rupiah
   const formatRupiah = (num) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(num);
 
-  // Helper Gambar (DIPINDAHKAN KE SINI AGAR BISA DIAKSES SEMUA)
+  // Helper Gambar 
   const getProductImage = (productName) => {
     if (!productName) return '/logo.png';
     const name = productName.toLowerCase();
@@ -48,54 +49,73 @@ const App = () => {
     return '/logo.png'; 
   };
 
-  // --- REALTIME LISTENERS (Jantung Aplikasi) ---
+  // --- REALTIME LISTENERS ---
   useEffect(() => {
-    // 1. Dengar perubahan Produk & Stok
     const unsubProducts = onSnapshot(collection(db, "products"), (snapshot) => {
       const productsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      
-      // LOGIKA SEEDING (Otomatis isi data jika database kosong)
       if (productsData.length === 0) {
         seedDatabase();
       } else {
-        // Sortir agar urutan tidak acak (berdasarkan ID manual atau nama)
         setProducts(productsData.sort((a,b) => a.sortOrder - b.sortOrder));
       }
     });
 
-    // 2. Dengar perubahan Pesanan
-    // Query order berdasarkan waktu agar yang terbaru diatas
-    const q = query(collection(db, "orders"));
-    const unsubOrders = onSnapshot(q, (snapshot) => {
+    const qOrders = query(collection(db, "orders"));
+    const unsubOrders = onSnapshot(qOrders, (snapshot) => {
       const ordersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      // Sort manual by timestamp string (simple approach)
       setOrders(ordersData.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp)));
+    });
+
+    const qUsers = query(collection(db, "users"));
+    const unsubUsers = onSnapshot(qUsers, (snapshot) => {
+      const usersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setUsersList(usersData.filter(u => u.role === 'customer'));
     });
 
     return () => {
       unsubProducts();
       unsubOrders();
+      unsubUsers();
     };
   }, []);
 
-  // Fungsi untuk mengisi Database pertama kali (Auto Seed)
   const seedDatabase = async () => {
     console.log("Seeding database...");
     const initialProducts = [
-      { name: 'Onigiri Salmon Mayo', price: 15000, color: 'bg-red-50', stock: 50, sortOrder: 1 },
-      { name: 'Onigiri Tuna Mayo', price: 12000, color: 'bg-blue-100', stock: 45, sortOrder: 2 },
-      { name: 'Onigiri Chicken Spam', price: 12000, color: 'bg-red-100', stock: 30, sortOrder: 3 },
+      { 
+        name: 'Onigiri Salmon Mayo', 
+        price: 15000, 
+        color: 'bg-red-50', 
+        stock: 30, 
+        sortOrder: 1,
+        description: "cooked salmon, kewpie mayo, bonito furikake, rice, nori"
+      },
+      { 
+        name: 'Onigiri Tuna Mayo', 
+        price: 12000, 
+        color: 'bg-blue-100', 
+        stock: 30, 
+        sortOrder: 2,
+        description: "cooked tuna, kewpie mayo, bonito furikake, rice, nori"
+      },
+      { 
+        name: 'Onigiri Chicken Spam', 
+        price: 12000, 
+        color: 'bg-red-100', 
+        stock: 30, 
+        sortOrder: 3,
+        description: "house chicken spam, sweet house sauce, kewpie mayo, bonito furikake, rice, nori"
+      },
     ];
     for (const p of initialProducts) {
       await addDoc(collection(db, "products"), p);
     }
   };
 
-  // --- LOGIKA AUTHENTICATION (Login/Register ke Firebase) ---
+  // --- LOGIKA AUTHENTICATION ---
   const handleLogin = async (username, pin, isRegistering) => {
     if (!username || !pin) return alert("Isi username dan PIN");
 
-    // Khusus Seller
     if (username === 'gillhardjo' && pin === '2131') {
       setCurrentUser({ username: 'gillhardjo', role: 'seller' });
       setCurrentScreen('s_home');
@@ -105,20 +125,17 @@ const App = () => {
     const usersRef = collection(db, "users");
     
     if (isRegistering) {
-      // Cek apakah user sudah ada
       const q = query(usersRef, where("username", "==", username));
       const querySnapshot = await getDocs(q);
       
       if (!querySnapshot.empty) {
         alert('Username sudah dipakai!');
       } else {
-        // Buat user baru di Firestore
         await addDoc(usersRef, { username, pin, role: 'customer' });
         setCurrentUser({ username, pin, role: 'customer' });
         setCurrentScreen('c_home');
       }
     } else {
-      // Login Logic: Cari user yang cocok
       const q = query(usersRef, where("username", "==", username), where("pin", "==", pin));
       const querySnapshot = await getDocs(q);
       
@@ -166,44 +183,31 @@ const App = () => {
       items: cart,
       total: cart.reduce((acc, item) => acc + (item.price * item.qty), 0),
       status: 'Menunggu Verifikasi',
-      timestamp: new Date().toISOString(), // Gunakan ISO string agar mudah disortir
-      displayTime: new Date().toLocaleString(), // Untuk tampilan
+      timestamp: new Date().toISOString(),
+      displayTime: new Date().toLocaleString(),
       paymentMethod: 'QRIS'
     };
 
-    // Simpan ke Firestore
     await addDoc(collection(db, "orders"), newOrder);
-    
     setCart([]);
     setCurrentScreen('c_status');
   };
 
-  // --- LOGIKA SELLER UPDATE STATUS & STOK ---
+  // --- LOGIKA SELLER (UPDATE STATUS, STOK, USER) ---
   const updateStatus = async (orderId, newStatus) => {
     const orderRef = doc(db, "orders", orderId);
-    
-    // Ambil data order saat ini
     const orderCurrent = orders.find(o => o.id === orderId);
     
-    // Logika Pengurangan Stok (Hanya jika status berubah jadi 'Pembayaran Diterima')
     if (newStatus === 'Pembayaran Diterima' && orderCurrent.status !== 'Pembayaran Diterima') {
-      
-      // Loop setiap item di order untuk kurangi stok di produk masing-masing
       for (const item of orderCurrent.items) {
-        // Cari produk di state products (karena kita butuh stok saat ini)
         const productRefInDb = products.find(p => p.id === item.productId);
-        
         if (productRefInDb) {
           const productDocRef = doc(db, "products", item.productId);
           const newStock = Math.max(0, productRefInDb.stock - item.qty);
-          
-          // Update stok di Firestore
           await updateDoc(productDocRef, { stock: newStock });
         }
       }
     }
-
-    // Update status order di Firestore
     await updateDoc(orderRef, { status: newStatus });
   };
 
@@ -212,6 +216,21 @@ const App = () => {
     if(product) {
        const productRef = doc(db, "products", productId);
        await updateDoc(productRef, { stock: Math.max(0, product.stock + delta) });
+    }
+  };
+
+  // Fitur Edit & Hapus User
+  const handleDeleteUser = async (userId) => {
+    if (window.confirm("Yakin ingin menghapus member ini? Data tidak bisa dikembalikan.")) {
+      await deleteDoc(doc(db, "users", userId));
+    }
+  };
+
+  const handleUpdatePin = async (userId, currentPin) => {
+    const newPin = window.prompt("Masukkan PIN baru untuk member ini:", currentPin);
+    if (newPin && newPin !== currentPin) {
+      await updateDoc(doc(db, "users", userId), { pin: newPin });
+      alert("PIN berhasil diubah!");
     }
   };
 
@@ -231,7 +250,6 @@ const App = () => {
         <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm">
           <div className="flex justify-center mb-6">
             <div className="w-32 h-32 bg-red-50 rounded-full flex items-center justify-center overflow-hidden border-4 border-red-100">
-               {/* UPDATED: Mengambil file logo.png dari folder public */}
                <img src="/logo.png" alt="Logo Tabetai" className="w-full h-full object-cover" />
             </div>
           </div>
@@ -266,6 +284,13 @@ const App = () => {
   const CustomerMenu = () => {
     const [selections, setSelections] = useState({});
 
+    // Kamus deskripsi lokal (fallback jika database belum diupdate)
+    const descriptions = {
+      'Onigiri Salmon Mayo': "cooked salmon, kewpie mayo, bonito furikake, rice, nori",
+      'Onigiri Tuna Mayo': "cooked tuna, kewpie mayo, bonito furikake, rice, nori",
+      'Onigiri Chicken Spam': "house chicken spam, sweet house sauce, kewpie mayo, bonito furikake, rice, nori"
+    };
+
     const handleSelectionChange = (id, field, value) => {
       setSelections(prev => {
         const currentSelection = prev[id] || { variant: 'Original', note: '', qty: 1 };
@@ -290,10 +315,12 @@ const App = () => {
           {products.length === 0 && <p className="text-center mt-10">Memuat Menu...</p>}
           {products.map(product => {
              const selection = selections[product.id] || { variant: 'Original', note: '', qty: 1 };
+             // Ambil deskripsi dari database, jika tidak ada, ambil dari kamus lokal
+             const desc = product.description || descriptions[product.name] || "";
+
              return (
               <div key={product.id} className="bg-white rounded-2xl shadow-sm overflow-hidden border border-gray-100">
                 <div className={`aspect-square w-full ${product.color} flex items-center justify-center relative group overflow-hidden`}>
-                  {/* UPDATED: Menggunakan file gambar dari folder public berdasarkan nama */}
                   <img 
                     src={getProductImage(product.name)} 
                     alt={product.name} 
@@ -305,10 +332,14 @@ const App = () => {
                   />
                 </div>
                 <div className="p-4">
-                  <div className="flex justify-between items-start mb-2">
-                    <h3 className="font-bold text-lg text-gray-800">{product.name}</h3>
-                    <span className="font-bold text-red-600">{formatRupiah(product.price)}</span>
+                  <div className="flex justify-between items-start mb-1">
+                    <h3 className="font-bold text-lg text-gray-800 leading-tight">{product.name}</h3>
+                    <span className="font-bold text-red-600 whitespace-nowrap ml-2">{formatRupiah(product.price)}</span>
                   </div>
+                  
+                  {/* DESKRIPSI PRODUK DITAMBAHKAN DI SINI */}
+                  <p className="text-xs text-gray-500 mb-4 leading-relaxed">{desc}</p>
+
                   <div className="mb-3">
                     <p className="text-xs font-bold text-gray-500 mb-1">Varian:</p>
                     <div className="flex gap-2">
@@ -363,7 +394,7 @@ const App = () => {
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <header className="bg-white p-4 shadow-sm flex justify-between items-center">
         <div>
-          <h1 className="text-xl font-bold text-gray-800">{currentUser.username} -san, Irasshaimase!</h1>
+          <h1 className="text-xl font-bold text-gray-800">{currentUser.username}-san, Irasshaimase</h1>
           <p className="text-xs text-gray-500">Kyou, nani tabetai?</p>
         </div>
         <button onClick={() => setCurrentScreen('login')} className="text-gray-400 hover:text-red-500"><LogOut size={20} /></button>
@@ -427,7 +458,6 @@ const App = () => {
     <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center p-6">
       <h2 className="text-2xl font-bold mb-8">Pembayaran QRIS</h2>
       <div className="bg-white p-6 rounded-3xl mb-8 w-full max-w-xs aspect-square flex items-center justify-center relative overflow-hidden">
-        {/* UPDATED: Mengambil file qris.png dari folder public */}
         <img src="qris.png" alt="QRIS Code" className="w-full h-full object-contain" />
       </div>
       <p className="text-gray-400 mb-8 text-center max-w-xs">Scan QR code di atas menggunakan aplikasi E-Wallet pilihan Anda.</p>
@@ -478,7 +508,7 @@ const App = () => {
       <header className="p-6 flex justify-between items-center bg-gray-900 shadow-lg">
         <div>
           <h1 className="text-2xl font-bold text-red-400">Seller Dashboard</h1>
-          <p className="text-sm text-gray-400">Selamat bekerja, Gillhardjo!</p>
+          <p className="text-sm text-gray-400">Konnichiwa, Gillhardjo!</p>
         </div>
         <button onClick={() => setCurrentScreen('login')} className="bg-gray-700 p-2 rounded-lg hover:bg-red-600 transition-colors"><LogOut size={20} /></button>
       </header>
@@ -493,7 +523,56 @@ const App = () => {
           <span className="text-xl font-bold">Stok Makanan</span>
           <span className="text-sm text-gray-400">Cek & Edit Stok</span>
         </button>
+        <button onClick={() => setCurrentScreen('s_users')} className="col-span-2 bg-gray-700 p-8 rounded-2xl flex flex-row items-center justify-center gap-4 hover:bg-gray-600 transition-colors border border-gray-600">
+           <div className="bg-purple-500 p-4 rounded-full text-white"><Users size={40} /></div>
+           <div className="text-left">
+             <span className="text-xl font-bold block">Daftar Member</span>
+             <span className="text-sm text-gray-400">{usersList.length} Terdaftar</span>
+           </div>
+        </button>
       </div>
+    </div>
+  );
+
+  // --- HALAMAN BARU: SELLER USERS LIST (UPDATED) ---
+  const SellerUsers = () => (
+    <div className="min-h-screen bg-gray-100 flex flex-col">
+       <div className="bg-white p-4 shadow-sm flex items-center gap-4 sticky top-0 z-10">
+          <button onClick={() => setCurrentScreen('s_home')} className="p-2 hover:bg-gray-100 rounded-full"><ArrowLeft /></button>
+          <h1 className="font-bold text-lg text-gray-800">Daftar Member</h1>
+        </div>
+        <div className="p-4 space-y-4">
+          {usersList.length === 0 && <p className="text-center text-gray-500 mt-10">Belum ada member terdaftar.</p>}
+          {usersList.map(user => (
+            <div key={user.id} className="bg-white p-4 rounded-xl shadow-sm flex items-center justify-between gap-4 border border-gray-200">
+               <div className="flex items-center gap-4">
+                  <div className="bg-purple-100 p-3 rounded-full text-purple-600">
+                    <User size={24} />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-gray-800">{user.username}</h3>
+                    <p className="text-xs text-gray-500">PIN: {user.pin}</p>
+                  </div>
+               </div>
+               <div className="flex gap-2">
+                 <button 
+                    onClick={() => handleUpdatePin(user.id, user.pin)} 
+                    className="p-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-yellow-100 hover:text-yellow-600 transition-colors"
+                    title="Ubah PIN"
+                 >
+                    <Pencil size={20} />
+                 </button>
+                 <button 
+                    onClick={() => handleDeleteUser(user.id)} 
+                    className="p-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-red-100 hover:text-red-600 transition-colors"
+                    title="Hapus User"
+                 >
+                    <Trash2 size={20} />
+                 </button>
+               </div>
+            </div>
+          ))}
+        </div>
     </div>
   );
 
@@ -554,7 +633,6 @@ const App = () => {
             <div key={product.id} className="bg-white p-6 rounded-xl shadow-sm flex justify-between items-center">
               <div className="flex items-center gap-4">
                 <div className={`w-12 h-12 ${product.color} rounded-lg flex items-center justify-center text-xl overflow-hidden`}>
-                   {/* UPDATED: Gambar di list stok juga */}
                    <img src={getProductImage(product.name)} alt={product.name} className="w-full h-full object-cover" />
                 </div>
                 <div>
@@ -588,6 +666,7 @@ const App = () => {
       {currentScreen === 's_home' && <SellerHome />}
       {currentScreen === 's_orders' && <SellerOrders />}
       {currentScreen === 's_stock' && <SellerStock />}
+      {currentScreen === 's_users' && <SellerUsers />}
     </div>
   );
 };
