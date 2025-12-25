@@ -735,7 +735,7 @@ const App = () => {
                     <button onClick={() => updateStockManual(product.id, 1)} className="w-8 h-8 rounded-full bg-gray-100 hover:bg-green-100 text-green-600 font-bold flex items-center justify-center"><Plus size={16} /></button>
                  </div>
               </div>
-            </div>p
+            </div>
           ))}
         </div>
       </div>
