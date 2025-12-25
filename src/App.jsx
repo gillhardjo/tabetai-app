@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   User, Lock, ShoppingBag, ChefHat, ArrowLeft, 
-  CreditCard, Clock, Package, LogOut, Plus, Minus, QrCode, Trash2, Users, Pencil 
+  CreditCard, Clock, Package, LogOut, Plus, Minus, QrCode, Trash2, Users, Pencil, MessageCircle 
 } from 'lucide-react';
 
 // --- FIREBASE IMPORTS ---
@@ -116,7 +116,10 @@ const App = () => {
   const handleLogin = async (username, pin, isRegistering) => {
     if (!username || !pin) return alert("Isi username dan PIN");
 
-    if (username === 'gillhardjo' && pin === '2131') {
+    // MODIFIKASI: Normalisasi username ke huruf kecil agar tidak case-sensitive
+    const normalizedUsername = username.toLowerCase();
+
+    if (normalizedUsername === 'gillhardjo' && pin === '2131') {
       setCurrentUser({ username: 'gillhardjo', role: 'seller' });
       setCurrentScreen('s_home');
       return;
@@ -125,18 +128,21 @@ const App = () => {
     const usersRef = collection(db, "users");
     
     if (isRegistering) {
-      const q = query(usersRef, where("username", "==", username));
+      // Cek user menggunakan normalizedUsername
+      const q = query(usersRef, where("username", "==", normalizedUsername));
       const querySnapshot = await getDocs(q);
       
       if (!querySnapshot.empty) {
         alert('Username sudah dipakai!');
       } else {
-        await addDoc(usersRef, { username, pin, role: 'customer' });
-        setCurrentUser({ username, pin, role: 'customer' });
+        // Simpan sebagai huruf kecil
+        await addDoc(usersRef, { username: normalizedUsername, pin, role: 'customer' });
+        setCurrentUser({ username: normalizedUsername, pin, role: 'customer' });
         setCurrentScreen('c_home');
       }
     } else {
-      const q = query(usersRef, where("username", "==", username), where("pin", "==", pin));
+      // Login cek menggunakan normalizedUsername
+      const q = query(usersRef, where("username", "==", normalizedUsername), where("pin", "==", pin));
       const querySnapshot = await getDocs(q);
       
       if (!querySnapshot.empty) {
@@ -268,7 +274,7 @@ const App = () => {
               <label className="block text-sm font-medium text-gray-700 mb-1">PIN Code (4 digit)</label>
               <div className="relative">
                 <Lock className="absolute left-3 top-3 text-gray-400" size={18} />
-                <input type="password" value={pin} onChange={(e) => setPin(e.target.value)} onKeyDown={handleKeyDown} className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-red-500 outline-none" placeholder="****" maxLength={4} />
+                <input type="passcode" value={pin} onChange={(e) => setPin(e.target.value)} onKeyDown={handleKeyDown} className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-red-500 outline-none" placeholder="****" maxLength={4} />
               </div>
             </div>
             <button onClick={() => handleLogin(username, pin, isRegister)} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl transition-colors shadow-lg shadow-red-200">{isRegister ? 'Daftar Sekarang' : 'Masuk'}</button>
@@ -337,7 +343,7 @@ const App = () => {
                     <span className="font-bold text-red-600 whitespace-nowrap ml-2">{formatRupiah(product.price)}</span>
                   </div>
                   
-                  {/* DESKRIPSI PRODUK DITAMBAHKAN DI SINI */}
+                  {/* DESKRIPSI PRODUK */}
                   <p className="text-xs text-gray-500 mb-4 leading-relaxed">{desc}</p>
 
                   <div className="mb-3">
@@ -394,7 +400,8 @@ const App = () => {
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <header className="bg-white p-4 shadow-sm flex justify-between items-center">
         <div>
-          <h1 className="text-xl font-bold text-gray-800">{currentUser.username}-san, Irasshaimase</h1>
+          {/* Tambahkan class 'capitalize' agar tampilan nama tetap bagus */}
+          <h1 className="text-xl font-bold text-gray-800 capitalize">{currentUser.username}-san, Irasshaimase</h1>
           <p className="text-xs text-gray-500">Kyou, nani tabetai?</p>
         </div>
         <button onClick={() => setCurrentScreen('login')} className="text-gray-400 hover:text-red-500"><LogOut size={20} /></button>
@@ -414,6 +421,19 @@ const App = () => {
             <p className="text-gray-500">Cek proses makananmu</p>
           </div>
         </button>
+      </div>
+
+      {/* FOOTER WHATSAPP CHAT */}
+      <div className="p-6 mt-auto">
+        <a 
+          href="https://wa.me/6281285557779?text=Halo%20Tabetai,%20saya%20ingin%20bertanya%20tentang%20menu."
+          target="_blank"
+          rel="noopener noreferrer"
+          className="bg-green-500 text-white p-4 rounded-xl shadow-lg flex items-center justify-center gap-2 font-bold hover:bg-green-600 transition-colors"
+        >
+          <MessageCircle size={24} />
+          Chat Seller (WhatsApp)
+        </a>
       </div>
     </div>
   );
@@ -550,7 +570,8 @@ const App = () => {
                     <User size={24} />
                   </div>
                   <div>
-                    <h3 className="font-bold text-gray-800">{user.username}</h3>
+                    {/* Tambahkan class 'capitalize' di sini juga */}
+                    <h3 className="font-bold text-gray-800 capitalize">{user.username}</h3>
                     <p className="text-xs text-gray-500">PIN: {user.pin}</p>
                   </div>
                </div>
