@@ -116,7 +116,6 @@ const App = () => {
   const handleLogin = async (username, pin, isRegistering) => {
     if (!username || !pin) return alert("Isi username dan PIN");
 
-    // MODIFIKASI: Normalisasi username ke huruf kecil agar tidak case-sensitive
     const normalizedUsername = username.toLowerCase();
 
     if (normalizedUsername === 'gillhardjo' && pin === '2131') {
@@ -128,20 +127,17 @@ const App = () => {
     const usersRef = collection(db, "users");
     
     if (isRegistering) {
-      // Cek user menggunakan normalizedUsername
       const q = query(usersRef, where("username", "==", normalizedUsername));
       const querySnapshot = await getDocs(q);
       
       if (!querySnapshot.empty) {
         alert('Username sudah dipakai!');
       } else {
-        // Simpan sebagai huruf kecil
         await addDoc(usersRef, { username: normalizedUsername, pin, role: 'customer' });
         setCurrentUser({ username: normalizedUsername, pin, role: 'customer' });
         setCurrentScreen('c_home');
       }
     } else {
-      // Login cek menggunakan normalizedUsername
       const q = query(usersRef, where("username", "==", normalizedUsername), where("pin", "==", pin));
       const querySnapshot = await getDocs(q);
       
@@ -217,6 +213,13 @@ const App = () => {
     await updateDoc(orderRef, { status: newStatus });
   };
 
+  // Fitur Hapus Order
+  const handleDeleteOrder = async (orderId) => {
+    if (window.confirm("Apakah Anda yakin ingin menghapus pesanan ini dari riwayat?")) {
+      await deleteDoc(doc(db, "orders", orderId));
+    }
+  };
+
   const updateStockManual = async (productId, delta) => {
     const product = products.find(p => p.id === productId);
     if(product) {
@@ -274,7 +277,6 @@ const App = () => {
               <label className="block text-sm font-medium text-gray-700 mb-1">PIN Code (4 digit)</label>
               <div className="relative">
                 <Lock className="absolute left-3 top-3 text-gray-400" size={18} />
-                {/* UBAH DARI type="passcode" KE type="password" */}
                 <input 
                   type="password" 
                   value={pin} 
@@ -313,10 +315,15 @@ const App = () => {
       });
     };
 
-    const adjustQty = (id, delta) => {
+    // Updated: adjustQty dengan batasan stok
+    const adjustQty = (id, delta, maxStock) => {
       setSelections(prev => {
         const currentSelection = prev[id] || { variant: 'Original', note: '', qty: 1 };
-        return { ...prev, [id]: { ...currentSelection, qty: Math.max(1, currentSelection.qty + delta) } };
+        // Pastikan qty tidak kurang dari 1 dan tidak lebih dari maxStock
+        let newQty = currentSelection.qty + delta;
+        newQty = Math.max(1, Math.min(newQty, maxStock));
+        
+        return { ...prev, [id]: { ...currentSelection, qty: newQty } };
       });
     };
 
@@ -330,16 +337,26 @@ const App = () => {
           {products.length === 0 && <p className="text-center mt-10">Memuat Menu...</p>}
           {products.map(product => {
              const selection = selections[product.id] || { variant: 'Original', note: '', qty: 1 };
-             // Ambil deskripsi dari database, jika tidak ada, ambil dari kamus lokal
              const desc = product.description || descriptions[product.name] || "";
+             
+             // LOGIKA STOK
+             const isSoldOut = product.stock === 0;
+             const isLowStock = product.stock > 0 && product.stock < 5;
 
              return (
-              <div key={product.id} className="bg-white rounded-2xl shadow-sm overflow-hidden border border-gray-100">
+              <div key={product.id} className={`bg-white rounded-2xl shadow-sm overflow-hidden border ${isSoldOut ? 'border-gray-200 opacity-70' : 'border-gray-100'}`}>
                 <div className={`aspect-square w-full ${product.color} flex items-center justify-center relative group overflow-hidden`}>
+                  {/* OVERLAY SOLD OUT */}
+                  {isSoldOut && (
+                    <div className="absolute inset-0 bg-black/60 z-20 flex items-center justify-center">
+                      <span className="text-white font-black text-3xl tracking-wider border-4 border-white p-2 rounded transform -rotate-12">SOLD OUT</span>
+                    </div>
+                  )}
+                  
                   <img 
                     src={getProductImage(product.name)} 
                     alt={product.name} 
-                    className="w-full h-full object-cover hover:scale-110 transition-transform duration-300"
+                    className={`w-full h-full object-cover transition-transform duration-300 ${!isSoldOut && 'hover:scale-110'} ${isSoldOut && 'grayscale'}`}
                     onError={(e) => {
                       e.target.onerror = null; 
                       e.target.src = "https://placehold.co/300x300/png?text=No+Image";
@@ -348,31 +365,61 @@ const App = () => {
                 </div>
                 <div className="p-4">
                   <div className="flex justify-between items-start mb-1">
-                    <h3 className="font-bold text-lg text-gray-800 leading-tight">{product.name}</h3>
+                    <div>
+                      <h3 className="font-bold text-lg text-gray-800 leading-tight">{product.name}</h3>
+                      {/* INDIKATOR STOK */}
+                      {isLowStock && <p className="text-xs text-red-500 font-bold animate-pulse mt-1">Low Stock: Tersisa {product.stock}!</p>}
+                      {!isSoldOut && !isLowStock && <p className="text-xs text-green-600 mt-1">Stok: {product.stock}</p>}
+                    </div>
                     <span className="font-bold text-red-600 whitespace-nowrap ml-2">{formatRupiah(product.price)}</span>
                   </div>
                   
-                  {/* DESKRIPSI PRODUK */}
                   <p className="text-xs text-gray-500 mb-4 leading-relaxed">{desc}</p>
 
                   <div className="mb-3">
                     <p className="text-xs font-bold text-gray-500 mb-1">Varian:</p>
                     <div className="flex gap-2">
                       {['Original', 'Spicy'].map(v => (
-                        <label key={v} className="flex items-center gap-1 text-sm cursor-pointer">
-                          <input type="radio" name={`variant-${product.id}`} checked={selection.variant === v} onChange={() => handleSelectionChange(product.id, 'variant', v)} className="accent-red-600" />{v}
+                        <label key={v} className={`flex items-center gap-1 text-sm ${isSoldOut ? 'cursor-not-allowed text-gray-400' : 'cursor-pointer'}`}>
+                          <input 
+                            type="radio" 
+                            name={`variant-${product.id}`} 
+                            checked={selection.variant === v} 
+                            onChange={() => !isSoldOut && handleSelectionChange(product.id, 'variant', v)} 
+                            disabled={isSoldOut}
+                            className="accent-red-600" 
+                          />{v}
                         </label>
                       ))}
                     </div>
                   </div>
                   <div className="mb-4">
-                    <input type="text" placeholder="Catatan (opsional)..." value={selection.note} className="w-full text-sm border-b border-gray-200 py-1 focus:border-red-500 outline-none bg-transparent" onChange={(e) => handleSelectionChange(product.id, 'note', e.target.value)} />
+                    <input 
+                      type="text" 
+                      placeholder={isSoldOut ? "Tidak tersedia" : "Catatan (opsional)..."}
+                      value={selection.note} 
+                      disabled={isSoldOut}
+                      className="w-full text-sm border-b border-gray-200 py-1 focus:border-red-500 outline-none bg-transparent disabled:bg-gray-50" 
+                      onChange={(e) => handleSelectionChange(product.id, 'note', e.target.value)} 
+                    />
                   </div>
                   <div className="flex items-center gap-3">
-                     <div className="flex items-center bg-gray-100 rounded-lg h-12">
-                        <button onClick={() => adjustQty(product.id, -1)} className="w-10 h-full flex items-center justify-center hover:bg-gray-200 rounded-l-lg"><Minus size={16} /></button>
+                     <div className={`flex items-center bg-gray-100 rounded-lg h-12 ${isSoldOut ? 'opacity-50' : ''}`}>
+                        <button 
+                          onClick={() => adjustQty(product.id, -1, product.stock)} 
+                          disabled={isSoldOut}
+                          className="w-10 h-full flex items-center justify-center hover:bg-gray-200 rounded-l-lg disabled:hover:bg-transparent"
+                        >
+                          <Minus size={16} />
+                        </button>
                         <span className="w-8 text-center font-bold text-sm">{selection.qty}</span>
-                        <button onClick={() => adjustQty(product.id, 1)} className="w-10 h-full flex items-center justify-center hover:bg-gray-200 rounded-r-lg"><Plus size={16} /></button>
+                        <button 
+                          onClick={() => adjustQty(product.id, 1, product.stock)} 
+                          disabled={isSoldOut || selection.qty >= product.stock}
+                          className="w-10 h-full flex items-center justify-center hover:bg-gray-200 rounded-r-lg disabled:hover:bg-transparent disabled:text-gray-400"
+                        >
+                          <Plus size={16} />
+                        </button>
                      </div>
                     <button 
                       onClick={() => {
@@ -380,9 +427,10 @@ const App = () => {
                         handleSelectionChange(product.id, 'qty', 1);
                         handleSelectionChange(product.id, 'note', '');
                       }}
-                      className="flex-1 bg-red-800 text-white h-12 rounded-xl font-bold text-sm hover:bg-red-700 active:scale-95 transition-all flex items-center justify-center gap-2"
+                      disabled={isSoldOut}
+                      className={`flex-1 text-white h-12 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 ${isSoldOut ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-800 hover:bg-red-700 active:scale-95'}`}
                     >
-                      <Plus size={18} /> Keranjang
+                      {isSoldOut ? 'Habis' : <><Plus size={18} /> Keranjang</>}
                     </button>
                   </div>
                 </div>
@@ -563,7 +611,6 @@ const App = () => {
     </div>
   );
 
-  // --- HALAMAN BARU: SELLER USERS LIST (UPDATED) ---
   const SellerUsers = () => (
     <div className="min-h-screen bg-gray-100 flex flex-col">
        <div className="bg-white p-4 shadow-sm flex items-center gap-4 sticky top-0 z-10">
@@ -579,7 +626,6 @@ const App = () => {
                     <User size={24} />
                   </div>
                   <div>
-                    {/* Tambahkan class 'capitalize' di sini juga */}
                     <h3 className="font-bold text-gray-800 capitalize">{user.username}</h3>
                     <p className="text-xs text-gray-500">PIN: {user.pin}</p>
                   </div>
@@ -616,10 +662,19 @@ const App = () => {
         <div className="p-4 space-y-4">
           {orders.length === 0 && <p className="text-center text-gray-500 mt-10">Belum ada pesanan.</p>}
           {orders.map(order => (
-            <div key={order.id} className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-              <div className="flex justify-between items-start mb-4 pb-4 border-b border-gray-100">
+            <div key={order.id} className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 relative group">
+              {/* TOMBOL HAPUS PESANAN */}
+              <button 
+                onClick={() => handleDeleteOrder(order.id)}
+                className="absolute top-4 right-4 p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"
+                title="Hapus Pesanan"
+              >
+                <Trash2 size={20} />
+              </button>
+
+              <div className="flex justify-between items-start mb-4 pb-4 border-b border-gray-100 pr-10">
                 <div>
-                  <h3 className="font-bold text-lg text-gray-800">{order.customer}</h3>
+                  <h3 className="font-bold text-lg text-gray-800 capitalize">{order.customer}</h3>
                   <span className="text-xs text-gray-400">...{order.id.slice(-5)} • {order.displayTime}</span>
                 </div>
                 <div className="text-right">
@@ -637,9 +692,9 @@ const App = () => {
                 ))}
               </div>
               <div className="flex flex-col gap-2">
-                <p className="text-xs font-bold text-gray-500">Update Status:</p>
+                <p className="text-xs font-bold text-gray-500">Status Pesanan:</p>
                 <div className="flex flex-wrap gap-2">
-                  <button onClick={() => updateStatus(order.id, 'Pembayaran Diterima')} disabled={order.status === 'Pembayaran Diterima'} className={`flex-1 py-2 px-3 rounded text-xs font-bold transition-colors ${order.status === 'Pembayaran Diterima' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600 hover:bg-blue-100'}`}>Terima Bayar</button>
+                  <button onClick={() => updateStatus(order.id, 'Pembayaran Diterima')} disabled={order.status === 'Pembayaran Diterima'} className={`flex-1 py-2 px-3 rounded text-xs font-bold transition-colors ${order.status === 'Pembayaran Diterima' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600 hover:bg-blue-100'}`}>Pembayaran Diterima</button>
                   <button onClick={() => updateStatus(order.id, 'Pesanan Dibuat')} disabled={order.status === 'Pesanan Dibuat'} className={`flex-1 py-2 px-3 rounded text-xs font-bold transition-colors ${order.status === 'Pesanan Dibuat' ? 'bg-red-500 text-white' : 'bg-gray-200 text-gray-600 hover:bg-red-100'}`}>Dibuat</button>
                   <button onClick={() => updateStatus(order.id, 'Pesanan Selesai')} disabled={order.status === 'Pesanan Selesai'} className={`flex-1 py-2 px-3 rounded text-xs font-bold transition-colors ${order.status === 'Pesanan Selesai' ? 'bg-green-600 text-white' : 'bg-gray-200 text-gray-600 hover:bg-green-100'}`}>Selesai</button>
                 </div>
