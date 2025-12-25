@@ -342,6 +342,7 @@ const App = () => {
              // LOGIKA STOK
              const isSoldOut = product.stock === 0;
              const isLowStock = product.stock > 0 && product.stock < 5;
+             const isHighStock = product.stock > 10;
 
              return (
               <div key={product.id} className={`bg-white rounded-2xl shadow-sm overflow-hidden border ${isSoldOut ? 'border-gray-200 opacity-70' : 'border-gray-100'}`}>
@@ -369,7 +370,8 @@ const App = () => {
                       <h3 className="font-bold text-lg text-gray-800 leading-tight">{product.name}</h3>
                       {/* INDIKATOR STOK */}
                       {isLowStock && <p className="text-xs text-red-500 font-bold animate-pulse mt-1">Low Stock: Tersisa {product.stock}!</p>}
-                      {!isSoldOut && !isLowStock && <p className="text-xs text-green-600 mt-1">Stok: {product.stock}</p>}
+                      {isHighStock && <p className="text-xs text-green-600 font-bold mt-1">Available</p>}
+                      {!isSoldOut && !isLowStock && !isHighStock && <p className="text-xs text-green-600 mt-1">Stok: {product.stock}</p>}
                     </div>
                     <span className="font-bold text-red-600 whitespace-nowrap ml-2">{formatRupiah(product.price)}</span>
                   </div>
@@ -733,7 +735,7 @@ const App = () => {
                     <button onClick={() => updateStockManual(product.id, 1)} className="w-8 h-8 rounded-full bg-gray-100 hover:bg-green-100 text-green-600 font-bold flex items-center justify-center"><Plus size={16} /></button>
                  </div>
               </div>
-            </div>
+            </div>p
           ))}
         </div>
       </div>
