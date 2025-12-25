@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   User, Lock, ShoppingBag, ChefHat, ArrowLeft, 
-  CreditCard, Clock, Package, LogOut, Plus, Minus, QrCode, Trash2, Users, Pencil, MessageCircle 
+  CreditCard, Clock, Package, LogOut, Plus, Minus, QrCode, Trash2, Users, Pencil, MessageCircle, Download 
 } from 'lucide-react';
 
 // --- FIREBASE IMPORTS ---
@@ -301,7 +301,7 @@ const App = () => {
   const CustomerMenu = () => {
     const [selections, setSelections] = useState({});
 
-    // Kamus deskripsi lokal (fallback jika database belum diupdate)
+    // Kamus deskripsi lokal
     const descriptions = {
       'Onigiri Salmon Mayo': "cooked salmon, kewpie mayo, bonito furikake, rice, nori",
       'Onigiri Tuna Mayo': "cooked tuna, kewpie mayo, bonito furikake, rice, nori",
@@ -315,14 +315,11 @@ const App = () => {
       });
     };
 
-    // Updated: adjustQty dengan batasan stok
     const adjustQty = (id, delta, maxStock) => {
       setSelections(prev => {
         const currentSelection = prev[id] || { variant: 'Original', note: '', qty: 1 };
-        // Pastikan qty tidak kurang dari 1 dan tidak lebih dari maxStock
         let newQty = currentSelection.qty + delta;
         newQty = Math.max(1, Math.min(newQty, maxStock));
-        
         return { ...prev, [id]: { ...currentSelection, qty: newQty } };
       });
     };
@@ -347,13 +344,11 @@ const App = () => {
              return (
               <div key={product.id} className={`bg-white rounded-2xl shadow-sm overflow-hidden border ${isSoldOut ? 'border-gray-200 opacity-70' : 'border-gray-100'}`}>
                 <div className={`aspect-square w-full ${product.color} flex items-center justify-center relative group overflow-hidden`}>
-                  {/* OVERLAY SOLD OUT */}
                   {isSoldOut && (
                     <div className="absolute inset-0 bg-black/60 z-20 flex items-center justify-center">
                       <span className="text-white font-black text-3xl tracking-wider border-4 border-white p-2 rounded transform -rotate-12">SOLD OUT</span>
                     </div>
                   )}
-                  
                   <img 
                     src={getProductImage(product.name)} 
                     alt={product.name} 
@@ -368,7 +363,6 @@ const App = () => {
                   <div className="flex justify-between items-start mb-1">
                     <div>
                       <h3 className="font-bold text-lg text-gray-800 leading-tight">{product.name}</h3>
-                      {/* INDIKATOR STOK */}
                       {isLowStock && <p className="text-xs text-red-500 font-bold animate-pulse mt-1">Low Stock: Tersisa {product.stock}!</p>}
                       {isHighStock && <p className="text-xs text-green-600 font-bold mt-1">Available</p>}
                       {!isSoldOut && !isLowStock && !isHighStock && <p className="text-xs text-green-600 mt-1">Stok: {product.stock}</p>}
@@ -459,7 +453,6 @@ const App = () => {
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <header className="bg-white p-4 shadow-sm flex justify-between items-center">
         <div>
-          {/* Tambahkan class 'capitalize' agar tampilan nama tetap bagus */}
           <h1 className="text-xl font-bold text-gray-800 capitalize">{currentUser.username}-san, Irasshaimase!</h1>
           <p className="text-xs text-gray-500">Kyou, nani tabetai?</p>
         </div>
@@ -482,7 +475,6 @@ const App = () => {
         </button>
       </div>
 
-      {/* FOOTER WHATSAPP CHAT */}
       <div className="p-6 mt-auto">
         <a 
           href="https://wa.me/6281285557779?text=Halo%20Tabetai,%20saya%20ingin%20bertanya%20tentang%20menu."
@@ -540,6 +532,16 @@ const App = () => {
         <img src="qris.png" alt="QRIS Code" className="w-full h-full object-contain" />
       </div>
       <p className="text-gray-400 mb-8 text-center max-w-xs">Scan QR code di atas menggunakan aplikasi E-Wallet pilihan Anda.</p>
+      
+      {/* BUTTON DOWNLOAD QRIS */}
+      <a 
+        href="/qris.png" 
+        download="QRIS_Tabetai.png"
+        className="text-sm text-gray-400 flex items-center gap-2 mb-8 hover:text-white transition-colors"
+      >
+        <Download size={16} /> Simpan Gambar QRIS
+      </a>
+
       <button onClick={handleCheckout} className="w-full max-w-sm bg-red-500 hover:bg-red-600 text-white font-bold py-4 rounded-2xl transition-all active:scale-95 shadow-[0_0_20px_rgba(239,68,68,0.4)]">Bayar Sekarang</button>
       <button onClick={() => setCurrentScreen('c_cart')} className="mt-4 text-gray-500 hover:text-white transition-colors">Batalkan</button>
     </div>
@@ -665,7 +667,6 @@ const App = () => {
           {orders.length === 0 && <p className="text-center text-gray-500 mt-10">Belum ada pesanan.</p>}
           {orders.map(order => (
             <div key={order.id} className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 relative group">
-              {/* TOMBOL HAPUS PESANAN */}
               <button 
                 onClick={() => handleDeleteOrder(order.id)}
                 className="absolute top-4 right-4 p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"
@@ -694,9 +695,9 @@ const App = () => {
                 ))}
               </div>
               <div className="flex flex-col gap-2">
-                <p className="text-xs font-bold text-gray-500">Status Pesanan:</p>
+                <p className="text-xs font-bold text-gray-500">Update Status:</p>
                 <div className="flex flex-wrap gap-2">
-                  <button onClick={() => updateStatus(order.id, 'Pembayaran Diterima')} disabled={order.status === 'Pembayaran Diterima'} className={`flex-1 py-2 px-3 rounded text-xs font-bold transition-colors ${order.status === 'Pembayaran Diterima' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600 hover:bg-blue-100'}`}>Pembayaran Diterima</button>
+                  <button onClick={() => updateStatus(order.id, 'Pembayaran Diterima')} disabled={order.status === 'Pembayaran Diterima'} className={`flex-1 py-2 px-3 rounded text-xs font-bold transition-colors ${order.status === 'Pembayaran Diterima' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600 hover:bg-blue-100'}`}>Terima Bayar</button>
                   <button onClick={() => updateStatus(order.id, 'Pesanan Dibuat')} disabled={order.status === 'Pesanan Dibuat'} className={`flex-1 py-2 px-3 rounded text-xs font-bold transition-colors ${order.status === 'Pesanan Dibuat' ? 'bg-red-500 text-white' : 'bg-gray-200 text-gray-600 hover:bg-red-100'}`}>Dibuat</button>
                   <button onClick={() => updateStatus(order.id, 'Pesanan Selesai')} disabled={order.status === 'Pesanan Selesai'} className={`flex-1 py-2 px-3 rounded text-xs font-bold transition-colors ${order.status === 'Pesanan Selesai' ? 'bg-green-600 text-white' : 'bg-gray-200 text-gray-600 hover:bg-green-100'}`}>Selesai</button>
                 </div>
