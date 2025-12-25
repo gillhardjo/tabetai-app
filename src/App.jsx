@@ -274,7 +274,16 @@ const App = () => {
               <label className="block text-sm font-medium text-gray-700 mb-1">PIN Code (4 digit)</label>
               <div className="relative">
                 <Lock className="absolute left-3 top-3 text-gray-400" size={18} />
-                <input type="passcode" value={pin} onChange={(e) => setPin(e.target.value)} onKeyDown={handleKeyDown} className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-red-500 outline-none" placeholder="****" maxLength={4} />
+                {/* UBAH DARI type="passcode" KE type="password" */}
+                <input 
+                  type="password" 
+                  value={pin} 
+                  onChange={(e) => setPin(e.target.value)} 
+                  onKeyDown={handleKeyDown} 
+                  className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-red-500 outline-none" 
+                  placeholder="****" 
+                  maxLength={4} 
+                />
               </div>
             </div>
             <button onClick={() => handleLogin(username, pin, isRegister)} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl transition-colors shadow-lg shadow-red-200">{isRegister ? 'Daftar Sekarang' : 'Masuk'}</button>
@@ -401,7 +410,7 @@ const App = () => {
       <header className="bg-white p-4 shadow-sm flex justify-between items-center">
         <div>
           {/* Tambahkan class 'capitalize' agar tampilan nama tetap bagus */}
-          <h1 className="text-xl font-bold text-gray-800 capitalize">{currentUser.username}-san, Irasshaimase</h1>
+          <h1 className="text-xl font-bold text-gray-800 capitalize">{currentUser.username}-san, Irasshaimase!</h1>
           <p className="text-xs text-gray-500">Kyou, nani tabetai?</p>
         </div>
         <button onClick={() => setCurrentScreen('login')} className="text-gray-400 hover:text-red-500"><LogOut size={20} /></button>
