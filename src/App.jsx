@@ -49,6 +49,51 @@ const App = () => {
     return '/logo.png'; 
   };
 
+  // --- LOGIKA AUTO LOGOUT (30 MENIT) ---
+  useEffect(() => {
+    // Fungsi update waktu terakhir user aktif
+    const updateActivity = () => {
+      if (currentUser) {
+        localStorage.setItem('lastActivity', Date.now().toString());
+      }
+    };
+
+    // Event listener untuk mendeteksi aktivitas
+    window.addEventListener('mousemove', updateActivity);
+    window.addEventListener('keypress', updateActivity);
+    window.addEventListener('click', updateActivity);
+    window.addEventListener('touchstart', updateActivity); // Untuk HP
+
+    // Interval cek setiap 1 menit
+    const checkInactivity = setInterval(() => {
+      const lastActivity = localStorage.getItem('lastActivity');
+      if (lastActivity && currentUser) {
+        const diff = Date.now() - parseInt(lastActivity, 10);
+        // 30 menit = 30 * 60 * 1000 ms
+        if (diff > 30 * 60 * 1000) {
+          alert('Sesi Anda telah berakhir karena tidak aktif selama 30 menit.');
+          setCurrentUser(null);
+          setCurrentScreen('login');
+          setCart([]);
+          localStorage.removeItem('lastActivity');
+        }
+      }
+    }, 60000); // Cek setiap 60 detik
+
+    // Inisialisasi waktu saat login
+    if (currentUser) {
+      updateActivity();
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', updateActivity);
+      window.removeEventListener('keypress', updateActivity);
+      window.removeEventListener('click', updateActivity);
+      window.removeEventListener('touchstart', updateActivity);
+      clearInterval(checkInactivity);
+    };
+  }, [currentUser]);
+
   // --- REALTIME LISTENERS ---
   useEffect(() => {
     const unsubProducts = onSnapshot(collection(db, "products"), (snapshot) => {
@@ -579,6 +624,19 @@ const App = () => {
               </div>
             ))
           )}
+        </div>
+
+        {/* BUTTON KONTAK SELLER SETELAH CHECKOUT */}
+        <div className="p-6 mt-auto bg-white border-t border-gray-200">
+          <a 
+            href="https://wa.me/6281285557779?text=Halo%20Tabetai,%20saya%20sudah%20melakukan%20pembayaran%20via%20QRIS,%20mohon%20dicek."
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full bg-green-500 text-white p-4 rounded-xl shadow-lg flex items-center justify-center gap-2 font-bold hover:bg-green-600 transition-colors"
+          >
+            <MessageCircle size={24} />
+            Konfirmasi Pembayaran ke Seller
+          </a>
         </div>
       </div>
     );
