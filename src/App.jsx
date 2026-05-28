@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { 
   User, Lock, ShoppingBag, ChefHat, ArrowLeft, 
-  CreditCard, Clock, Package, LogOut, Plus, Minus, QrCode, Trash2 
+  CreditCard, Clock, Package, LogOut, Plus, Minus, QrCode, Trash2, Users, Pencil, MessageCircle, Download, Save, X 
 } from 'lucide-react';
 
 // --- FIREBASE IMPORTS ---
 import { initializeApp } from "firebase/app";
 import { 
-  getFirestore, collection, addDoc, updateDoc, doc, 
+  getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, 
   onSnapshot, query, where, getDocs, setDoc 
 } from "firebase/firestore";
 
@@ -34,63 +34,138 @@ const App = () => {
   const [products, setProducts] = useState([]);
   const [orders, setOrders] = useState([]);
   const [cart, setCart] = useState([]);
+  const [usersList, setUsersList] = useState([]); 
 
   // Helper Format Rupiah
   const formatRupiah = (num) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(num);
 
-  // --- REALTIME LISTENERS (Jantung Aplikasi) ---
+  // Helper Gambar (Diperbarui agar mendeteksi nama gambar otomatis)
+  const getProductImage = (productName) => {
+    if (!productName) return '/logo.png';
+    const name = productName.toLowerCase();
+    
+    if (name.includes('salmon')) return '/salmon.png';
+    if (name.includes('tuna')) return '/tuna.png';
+    if (name.includes('chicken')) return '/chicken.png';
+    
+    // Logika Otomatis untuk menu baru: Ambil kata kedua dari nama menu
+    // Contoh: "Onigiri Tamago" -> akan mencari file "/tamago.png"
+    const words = name.split(' ');
+    if (words.length > 1) {
+      return `/${words[1]}.png`;
+    }
+
+    return '/logo.png'; 
+  };
+
+  // --- LOGIKA AUTO LOGOUT (30 MENIT) ---
   useEffect(() => {
-    // 1. Dengar perubahan Produk & Stok
+    const updateActivity = () => {
+      if (currentUser) {
+        localStorage.setItem('lastActivity', Date.now().toString());
+      }
+    };
+
+    window.addEventListener('mousemove', updateActivity);
+    window.addEventListener('keypress', updateActivity);
+    window.addEventListener('click', updateActivity);
+    window.addEventListener('touchstart', updateActivity); 
+
+    const checkInactivity = setInterval(() => {
+      const lastActivity = localStorage.getItem('lastActivity');
+      if (lastActivity && currentUser) {
+        const diff = Date.now() - parseInt(lastActivity, 10);
+        if (diff > 30 * 60 * 1000) {
+          alert('Sesi Anda telah berakhir karena tidak aktif selama 30 menit.');
+          setCurrentUser(null);
+          setCurrentScreen('login');
+          setCart([]);
+          localStorage.removeItem('lastActivity');
+        }
+      }
+    }, 60000); 
+
+    if (currentUser) updateActivity();
+
+    return () => {
+      window.removeEventListener('mousemove', updateActivity);
+      window.removeEventListener('keypress', updateActivity);
+      window.removeEventListener('click', updateActivity);
+      window.removeEventListener('touchstart', updateActivity);
+      clearInterval(checkInactivity);
+    };
+  }, [currentUser]);
+
+  // --- REALTIME LISTENERS ---
+  useEffect(() => {
     const unsubProducts = onSnapshot(collection(db, "products"), (snapshot) => {
       const productsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      
-      // LOGIKA SEEDING (Otomatis isi data jika database kosong)
       if (productsData.length === 0) {
         seedDatabase();
       } else {
-        // Sortir agar urutan tidak acak (berdasarkan ID manual atau nama)
         setProducts(productsData.sort((a,b) => a.sortOrder - b.sortOrder));
       }
     });
 
-    // 2. Dengar perubahan Pesanan
-    // Query order berdasarkan waktu agar yang terbaru diatas
-    const q = query(collection(db, "orders"));
-    const unsubOrders = onSnapshot(q, (snapshot) => {
+    const qOrders = query(collection(db, "orders"));
+    const unsubOrders = onSnapshot(qOrders, (snapshot) => {
       const ordersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      // Sort manual by timestamp string (simple approach)
       setOrders(ordersData.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp)));
+    });
+
+    const qUsers = query(collection(db, "users"));
+    const unsubUsers = onSnapshot(qUsers, (snapshot) => {
+      const usersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setUsersList(usersData.filter(u => u.role === 'customer'));
     });
 
     return () => {
       unsubProducts();
       unsubOrders();
+      unsubUsers();
     };
   }, []);
 
-  // Fungsi untuk mengisi Database pertama kali (Auto Seed)
   const seedDatabase = async () => {
     console.log("Seeding database...");
     const initialProducts = [
-      { name: 'Onigiri Salmon Mayo', price: 15000, color: 'bg-red-50', stock: 50, sortOrder: 1 },
-      { name: 'Onigiri Tuna Mayo', price: 12000, color: 'bg-blue-100', stock: 45, sortOrder: 2 },
-      { name: 'Onigiri Chicken Spam', price: 12000, color: 'bg-red-100', stock: 30, sortOrder: 3 },
-      { name: 'Onigiri Tori Soboro', price: 12000, color: 'bg-red-100', stock: 30, sortOrder: 3 },
-      { name: 'Inari Salmon', price: 18000, color: 'bg-red-50', stock: 50, sortOrder: 1 },
-      { name: 'Inari Tuna', price: 17000, color: 'bg-blue-100', stock: 45, sortOrder: 2 },
-      { name: 'Inari', price: 15000, color: 'bg-red-100', stock: 30, sortOrder: 3 },
+      { 
+        name: 'Onigiri Salmon Mayo', 
+        price: 15000, 
+        color: 'bg-red-50', 
+        stock: 30, 
+        sortOrder: 1,
+        description: "cooked salmon, kewpie mayo, bonito furikake, rice, nori"
+      },
+      { 
+        name: 'Onigiri Tuna Mayo', 
+        price: 12000, 
+        color: 'bg-blue-100', 
+        stock: 30, 
+        sortOrder: 2,
+        description: "cooked tuna, kewpie mayo, bonito furikake, rice, nori"
+      },
+      { 
+        name: 'Onigiri Chicken Spam', 
+        price: 12000, 
+        color: 'bg-red-100', 
+        stock: 30, 
+        sortOrder: 3,
+        description: "house chicken spam, sweet house sauce, kewpie mayo, bonito furikake, rice, nori"
+      },
     ];
     for (const p of initialProducts) {
       await addDoc(collection(db, "products"), p);
     }
   };
 
-  // --- LOGIKA AUTHENTICATION (Login/Register ke Firebase) ---
+  // --- LOGIKA AUTHENTICATION ---
   const handleLogin = async (username, pin, isRegistering) => {
     if (!username || !pin) return alert("Isi username dan PIN");
 
-    // Khusus Seller
-    if (username === 'gillhardjo' && pin === '2131') {
+    const normalizedUsername = username.toLowerCase();
+
+    if (normalizedUsername === 'gillhardjo' && pin === '2131') {
       setCurrentUser({ username: 'gillhardjo', role: 'seller' });
       setCurrentScreen('s_home');
       return;
@@ -99,21 +174,18 @@ const App = () => {
     const usersRef = collection(db, "users");
     
     if (isRegistering) {
-      // Cek apakah user sudah ada
-      const q = query(usersRef, where("username", "==", username));
+      const q = query(usersRef, where("username", "==", normalizedUsername));
       const querySnapshot = await getDocs(q);
       
       if (!querySnapshot.empty) {
         alert('Username sudah dipakai!');
       } else {
-        // Buat user baru di Firestore
-        await addDoc(usersRef, { username, pin, role: 'customer' });
-        setCurrentUser({ username, pin, role: 'customer' });
+        await addDoc(usersRef, { username: normalizedUsername, pin, role: 'customer' });
+        setCurrentUser({ username: normalizedUsername, pin, role: 'customer' });
         setCurrentScreen('c_home');
       }
     } else {
-      // Login Logic: Cari user yang cocok
-      const q = query(usersRef, where("username", "==", username), where("pin", "==", pin));
+      const q = query(usersRef, where("username", "==", normalizedUsername), where("pin", "==", pin));
       const querySnapshot = await getDocs(q);
       
       if (!querySnapshot.empty) {
@@ -160,45 +232,38 @@ const App = () => {
       items: cart,
       total: cart.reduce((acc, item) => acc + (item.price * item.qty), 0),
       status: 'Menunggu Verifikasi',
-      timestamp: new Date().toISOString(), // Gunakan ISO string agar mudah disortir
-      displayTime: new Date().toLocaleString(), // Untuk tampilan
+      timestamp: new Date().toISOString(),
+      displayTime: new Date().toLocaleString(),
       paymentMethod: 'QRIS'
     };
 
-    // Simpan ke Firestore
     await addDoc(collection(db, "orders"), newOrder);
-    
     setCart([]);
     setCurrentScreen('c_status');
   };
 
-  // --- LOGIKA SELLER UPDATE STATUS & STOK ---
+  // --- LOGIKA SELLER (UPDATE STATUS, STOK, USER) ---
   const updateStatus = async (orderId, newStatus) => {
     const orderRef = doc(db, "orders", orderId);
-    
-    // Ambil data order saat ini
     const orderCurrent = orders.find(o => o.id === orderId);
     
-    // Logika Pengurangan Stok (Hanya jika status berubah jadi 'Pembayaran Diterima')
     if (newStatus === 'Pembayaran Diterima' && orderCurrent.status !== 'Pembayaran Diterima') {
-      
-      // Loop setiap item di order untuk kurangi stok di produk masing-masing
       for (const item of orderCurrent.items) {
-        // Cari produk di state products (karena kita butuh stok saat ini)
         const productRefInDb = products.find(p => p.id === item.productId);
-        
         if (productRefInDb) {
           const productDocRef = doc(db, "products", item.productId);
           const newStock = Math.max(0, productRefInDb.stock - item.qty);
-          
-          // Update stok di Firestore
           await updateDoc(productDocRef, { stock: newStock });
         }
       }
     }
-
-    // Update status order di Firestore
     await updateDoc(orderRef, { status: newStatus });
+  };
+
+  const handleDeleteOrder = async (orderId) => {
+    if (window.confirm("Apakah Anda yakin ingin menghapus pesanan ini dari riwayat?")) {
+      await deleteDoc(doc(db, "orders", orderId));
+    }
   };
 
   const updateStockManual = async (productId, delta) => {
@@ -206,6 +271,20 @@ const App = () => {
     if(product) {
        const productRef = doc(db, "products", productId);
        await updateDoc(productRef, { stock: Math.max(0, product.stock + delta) });
+    }
+  };
+
+  const handleDeleteUser = async (userId) => {
+    if (window.confirm("Yakin ingin menghapus member ini? Data tidak bisa dikembalikan.")) {
+      await deleteDoc(doc(db, "users", userId));
+    }
+  };
+
+  const handleUpdatePin = async (userId, currentPin) => {
+    const newPin = window.prompt("Masukkan PIN baru untuk member ini:", currentPin);
+    if (newPin && newPin !== currentPin) {
+      await updateDoc(doc(db, "users", userId), { pin: newPin });
+      alert("PIN berhasil diubah!");
     }
   };
 
@@ -225,12 +304,11 @@ const App = () => {
         <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm">
           <div className="flex justify-center mb-6">
             <div className="w-32 h-32 bg-red-50 rounded-full flex items-center justify-center overflow-hidden border-4 border-red-100">
-               {/* UPDATED: Mengambil file logo.png dari folder public */}
                <img src="/logo.png" alt="Logo Tabetai" className="w-full h-full object-cover" />
             </div>
           </div>
           <h2 className="text-2xl font-bold text-center text-gray-800 mb-2">Tabetai</h2>
-          <p className="text-center text-gray-500 mb-8">{isRegister ? 'Registrasi Akun Baru' : 'Masuk ke Aplikasi'}</p>
+          <p className="text-center text-gray-500 mb-8">{isRegister ? 'Registrasi Akun Baru' : 'Oishii Onigiri'}</p>
 
           <div className="space-y-4">
             <div>
@@ -241,10 +319,18 @@ const App = () => {
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">PIN Code</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">PIN Code (4 digit)</label>
               <div className="relative">
                 <Lock className="absolute left-3 top-3 text-gray-400" size={18} />
-                <input type="password" value={pin} onChange={(e) => setPin(e.target.value)} onKeyDown={handleKeyDown} className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-red-500 outline-none" placeholder="****" maxLength={4} />
+                <input 
+                  type="password" 
+                  value={pin} 
+                  onChange={(e) => setPin(e.target.value)} 
+                  onKeyDown={handleKeyDown} 
+                  className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-red-500 outline-none" 
+                  placeholder="****" 
+                  maxLength={4} 
+                />
               </div>
             </div>
             <button onClick={() => handleLogin(username, pin, isRegister)} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl transition-colors shadow-lg shadow-red-200">{isRegister ? 'Daftar Sekarang' : 'Masuk'}</button>
@@ -267,20 +353,13 @@ const App = () => {
       });
     };
 
-    const adjustQty = (id, delta) => {
+    const adjustQty = (id, delta, maxStock) => {
       setSelections(prev => {
         const currentSelection = prev[id] || { variant: 'Original', note: '', qty: 1 };
-        return { ...prev, [id]: { ...currentSelection, qty: Math.max(1, currentSelection.qty + delta) } };
+        let newQty = currentSelection.qty + delta;
+        newQty = Math.max(1, Math.min(newQty, maxStock));
+        return { ...prev, [id]: { ...currentSelection, qty: newQty } };
       });
-    };
-
-    // Helper untuk menentukan gambar berdasarkan nama produk
-    const getProductImage = (productName) => {
-      const name = productName.toLowerCase();
-      if (name.includes('salmon')) return '/salmon.png';
-      if (name.includes('tuna')) return '/tuna.png';
-      if (name.includes('chicken')) return '/chicken.png';
-      return '/logo.png'; // Fallback ke logo jika nama tidak cocok
     };
 
     return (
@@ -293,14 +372,25 @@ const App = () => {
           {products.length === 0 && <p className="text-center mt-10">Memuat Menu...</p>}
           {products.map(product => {
              const selection = selections[product.id] || { variant: 'Original', note: '', qty: 1 };
+             const desc = product.description || "";
+             
+             // LOGIKA STOK
+             const isSoldOut = product.stock === 0;
+             const isLowStock = product.stock > 0 && product.stock < 5;
+             const isHighStock = product.stock > 10;
+
              return (
-              <div key={product.id} className="bg-white rounded-2xl shadow-sm overflow-hidden border border-gray-100">
+              <div key={product.id} className={`bg-white rounded-2xl shadow-sm overflow-hidden border ${isSoldOut ? 'border-gray-200 opacity-70' : 'border-gray-100'}`}>
                 <div className={`aspect-square w-full ${product.color} flex items-center justify-center relative group overflow-hidden`}>
-                  {/* UPDATED: Menggunakan file gambar dari folder public berdasarkan nama */}
+                  {isSoldOut && (
+                    <div className="absolute inset-0 bg-black/60 z-20 flex items-center justify-center">
+                      <span className="text-white font-black text-3xl tracking-wider border-4 border-white p-2 rounded transform -rotate-12">SOLD OUT</span>
+                    </div>
+                  )}
                   <img 
                     src={getProductImage(product.name)} 
                     alt={product.name} 
-                    className="w-full h-full object-cover hover:scale-110 transition-transform duration-300"
+                    className={`w-full h-full object-cover transition-transform duration-300 ${!isSoldOut && 'hover:scale-110'} ${isSoldOut && 'grayscale'}`}
                     onError={(e) => {
                       e.target.onerror = null; 
                       e.target.src = "https://placehold.co/300x300/png?text=No+Image";
@@ -308,28 +398,62 @@ const App = () => {
                   />
                 </div>
                 <div className="p-4">
-                  <div className="flex justify-between items-start mb-2">
-                    <h3 className="font-bold text-lg text-gray-800">{product.name}</h3>
-                    <span className="font-bold text-red-600">{formatRupiah(product.price)}</span>
+                  <div className="flex justify-between items-start mb-1">
+                    <div>
+                      <h3 className="font-bold text-lg text-gray-800 leading-tight">{product.name}</h3>
+                      {isLowStock && <p className="text-xs text-red-500 font-bold animate-pulse mt-1">Low Stock: Tersisa {product.stock}!</p>}
+                      {isHighStock && <p className="text-xs text-green-600 font-bold mt-1">Available</p>}
+                      {!isSoldOut && !isLowStock && !isHighStock && <p className="text-xs text-green-600 mt-1">Stok: {product.stock}</p>}
+                    </div>
+                    <span className="font-bold text-red-600 whitespace-nowrap ml-2">{formatRupiah(product.price)}</span>
                   </div>
+                  
+                  <p className="text-xs text-gray-500 mb-4 leading-relaxed">{desc}</p>
+
                   <div className="mb-3">
                     <p className="text-xs font-bold text-gray-500 mb-1">Varian:</p>
                     <div className="flex gap-2">
                       {['Original', 'Spicy'].map(v => (
-                        <label key={v} className="flex items-center gap-1 text-sm cursor-pointer">
-                          <input type="radio" name={`variant-${product.id}`} checked={selection.variant === v} onChange={() => handleSelectionChange(product.id, 'variant', v)} className="accent-red-600" />{v}
+                        <label key={v} className={`flex items-center gap-1 text-sm ${isSoldOut ? 'cursor-not-allowed text-gray-400' : 'cursor-pointer'}`}>
+                          <input 
+                            type="radio" 
+                            name={`variant-${product.id}`} 
+                            checked={selection.variant === v} 
+                            onChange={() => !isSoldOut && handleSelectionChange(product.id, 'variant', v)} 
+                            disabled={isSoldOut}
+                            className="accent-red-600" 
+                          />{v}
                         </label>
                       ))}
                     </div>
                   </div>
                   <div className="mb-4">
-                    <input type="text" placeholder="Catatan (opsional)..." value={selection.note} className="w-full text-sm border-b border-gray-200 py-1 focus:border-red-500 outline-none bg-transparent" onChange={(e) => handleSelectionChange(product.id, 'note', e.target.value)} />
+                    <input 
+                      type="text" 
+                      placeholder={isSoldOut ? "Tidak tersedia" : "Catatan (opsional)..."}
+                      value={selection.note} 
+                      disabled={isSoldOut}
+                      className="w-full text-sm border-b border-gray-200 py-1 focus:border-red-500 outline-none bg-transparent disabled:bg-gray-50" 
+                      onChange={(e) => handleSelectionChange(product.id, 'note', e.target.value)} 
+                    />
                   </div>
                   <div className="flex items-center gap-3">
-                     <div className="flex items-center bg-gray-100 rounded-lg h-12">
-                        <button onClick={() => adjustQty(product.id, -1)} className="w-10 h-full flex items-center justify-center hover:bg-gray-200 rounded-l-lg"><Minus size={16} /></button>
+                     <div className={`flex items-center bg-gray-100 rounded-lg h-12 ${isSoldOut ? 'opacity-50' : ''}`}>
+                        <button 
+                          onClick={() => adjustQty(product.id, -1, product.stock)} 
+                          disabled={isSoldOut}
+                          className="w-10 h-full flex items-center justify-center hover:bg-gray-200 rounded-l-lg disabled:hover:bg-transparent"
+                        >
+                          <Minus size={16} />
+                        </button>
                         <span className="w-8 text-center font-bold text-sm">{selection.qty}</span>
-                        <button onClick={() => adjustQty(product.id, 1)} className="w-10 h-full flex items-center justify-center hover:bg-gray-200 rounded-r-lg"><Plus size={16} /></button>
+                        <button 
+                          onClick={() => adjustQty(product.id, 1, product.stock)} 
+                          disabled={isSoldOut || selection.qty >= product.stock}
+                          className="w-10 h-full flex items-center justify-center hover:bg-gray-200 rounded-r-lg disabled:hover:bg-transparent disabled:text-gray-400"
+                        >
+                          <Plus size={16} />
+                        </button>
                      </div>
                     <button 
                       onClick={() => {
@@ -337,9 +461,10 @@ const App = () => {
                         handleSelectionChange(product.id, 'qty', 1);
                         handleSelectionChange(product.id, 'note', '');
                       }}
-                      className="flex-1 bg-red-800 text-white h-12 rounded-xl font-bold text-sm hover:bg-red-700 active:scale-95 transition-all flex items-center justify-center gap-2"
+                      disabled={isSoldOut}
+                      className={`flex-1 text-white h-12 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 ${isSoldOut ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-800 hover:bg-red-700 active:scale-95'}`}
                     >
-                      <Plus size={18} /> Keranjang
+                      {isSoldOut ? 'Habis' : <><Plus size={18} /> Keranjang</>}
                     </button>
                   </div>
                 </div>
@@ -366,8 +491,8 @@ const App = () => {
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <header className="bg-white p-4 shadow-sm flex justify-between items-center">
         <div>
-          <h1 className="text-xl font-bold text-gray-800">Halo, {currentUser.username}</h1>
-          <p className="text-xs text-gray-500">Mau makan apa hari ini?</p>
+          <h1 className="text-xl font-bold text-gray-800 capitalize">{currentUser.username}-san, Irasshaimase!</h1>
+          <p className="text-xs text-gray-500">Kyou, nani tabetai?</p>
         </div>
         <button onClick={() => setCurrentScreen('login')} className="text-gray-400 hover:text-red-500"><LogOut size={20} /></button>
       </header>
@@ -386,6 +511,18 @@ const App = () => {
             <p className="text-gray-500">Cek proses makananmu</p>
           </div>
         </button>
+      </div>
+
+      <div className="p-6 mt-auto">
+        <a 
+          href="https://wa.me/6281285557779?text=Halo%20Tabetai,%20saya%20ingin%20bertanya%20tentang%20menu."
+          target="_blank"
+          rel="noopener noreferrer"
+          className="bg-green-500 text-white p-4 rounded-xl shadow-lg flex items-center justify-center gap-2 font-bold hover:bg-green-600 transition-colors"
+        >
+          <MessageCircle size={24} />
+          Chat Seller (WhatsApp)
+        </a>
       </div>
     </div>
   );
@@ -430,10 +567,18 @@ const App = () => {
     <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center p-6">
       <h2 className="text-2xl font-bold mb-8">Pembayaran QRIS</h2>
       <div className="bg-white p-6 rounded-3xl mb-8 w-full max-w-xs aspect-square flex items-center justify-center relative overflow-hidden">
-        {/* UPDATED: Mengambil file qris.png dari folder public */}
-        <img src="/qris.png" alt="QRIS Code" className="w-full h-full object-contain" />
+        <img src="qris.png" alt="QRIS Code" className="w-full h-full object-contain" />
       </div>
       <p className="text-gray-400 mb-8 text-center max-w-xs">Scan QR code di atas menggunakan aplikasi E-Wallet pilihan Anda.</p>
+      
+      <a 
+        href="/qris.png" 
+        download="QRIS_Tabetai.png"
+        className="text-sm text-gray-400 flex items-center gap-2 mb-8 hover:text-white transition-colors"
+      >
+        <Download size={16} /> Simpan Gambar QRIS
+      </a>
+
       <button onClick={handleCheckout} className="w-full max-w-sm bg-red-500 hover:bg-red-600 text-white font-bold py-4 rounded-2xl transition-all active:scale-95 shadow-[0_0_20px_rgba(239,68,68,0.4)]">Bayar Sekarang</button>
       <button onClick={() => setCurrentScreen('c_cart')} className="mt-4 text-gray-500 hover:text-white transition-colors">Batalkan</button>
     </div>
@@ -472,6 +617,18 @@ const App = () => {
             ))
           )}
         </div>
+
+        <div className="p-6 mt-auto bg-white border-t border-gray-200">
+          <a 
+            href="https://wa.me/6281285557779?text=Halo%20Tabetai,%20saya%20sudah%20melakukan%20pembayaran%20via%20QRIS,%20mohon%20dicek."
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full bg-green-500 text-white p-4 rounded-xl shadow-lg flex items-center justify-center gap-2 font-bold hover:bg-green-600 transition-colors"
+          >
+            <MessageCircle size={24} />
+            Konfirmasi Pembayaran
+          </a>
+        </div>
       </div>
     );
   };
@@ -481,7 +638,7 @@ const App = () => {
       <header className="p-6 flex justify-between items-center bg-gray-900 shadow-lg">
         <div>
           <h1 className="text-2xl font-bold text-red-400">Seller Dashboard</h1>
-          <p className="text-sm text-gray-400">Selamat bekerja, Gillhardjo!</p>
+          <p className="text-sm text-gray-400">Konnichiwa, Gillhardjo!</p>
         </div>
         <button onClick={() => setCurrentScreen('login')} className="bg-gray-700 p-2 rounded-lg hover:bg-red-600 transition-colors"><LogOut size={20} /></button>
       </header>
@@ -496,7 +653,55 @@ const App = () => {
           <span className="text-xl font-bold">Stok Makanan</span>
           <span className="text-sm text-gray-400">Cek & Edit Stok</span>
         </button>
+        <button onClick={() => setCurrentScreen('s_users')} className="col-span-2 bg-gray-700 p-8 rounded-2xl flex flex-row items-center justify-center gap-4 hover:bg-gray-600 transition-colors border border-gray-600">
+           <div className="bg-purple-500 p-4 rounded-full text-white"><Users size={40} /></div>
+           <div className="text-left">
+             <span className="text-xl font-bold block">Daftar Member</span>
+             <span className="text-sm text-gray-400">{usersList.length} Terdaftar</span>
+           </div>
+        </button>
       </div>
+    </div>
+  );
+
+  const SellerUsers = () => (
+    <div className="min-h-screen bg-gray-100 flex flex-col">
+       <div className="bg-white p-4 shadow-sm flex items-center gap-4 sticky top-0 z-10">
+          <button onClick={() => setCurrentScreen('s_home')} className="p-2 hover:bg-gray-100 rounded-full"><ArrowLeft /></button>
+          <h1 className="font-bold text-lg text-gray-800">Daftar Member</h1>
+        </div>
+        <div className="p-4 space-y-4">
+          {usersList.length === 0 && <p className="text-center text-gray-500 mt-10">Belum ada member terdaftar.</p>}
+          {usersList.map(user => (
+            <div key={user.id} className="bg-white p-4 rounded-xl shadow-sm flex items-center justify-between gap-4 border border-gray-200">
+               <div className="flex items-center gap-4">
+                  <div className="bg-purple-100 p-3 rounded-full text-purple-600">
+                    <User size={24} />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-gray-800 capitalize">{user.username}</h3>
+                    <p className="text-xs text-gray-500">PIN: {user.pin}</p>
+                  </div>
+               </div>
+               <div className="flex gap-2">
+                 <button 
+                    onClick={() => handleUpdatePin(user.id, user.pin)} 
+                    className="p-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-yellow-100 hover:text-yellow-600 transition-colors"
+                    title="Ubah PIN"
+                 >
+                    <Pencil size={20} />
+                 </button>
+                 <button 
+                    onClick={() => handleDeleteUser(user.id)} 
+                    className="p-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-red-100 hover:text-red-600 transition-colors"
+                    title="Hapus User"
+                 >
+                    <Trash2 size={20} />
+                 </button>
+               </div>
+            </div>
+          ))}
+        </div>
     </div>
   );
 
@@ -510,10 +715,18 @@ const App = () => {
         <div className="p-4 space-y-4">
           {orders.length === 0 && <p className="text-center text-gray-500 mt-10">Belum ada pesanan.</p>}
           {orders.map(order => (
-            <div key={order.id} className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-              <div className="flex justify-between items-start mb-4 pb-4 border-b border-gray-100">
+            <div key={order.id} className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 relative group">
+              <button 
+                onClick={() => handleDeleteOrder(order.id)}
+                className="absolute top-4 right-4 p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"
+                title="Hapus Pesanan"
+              >
+                <Trash2 size={20} />
+              </button>
+
+              <div className="flex justify-between items-start mb-4 pb-4 border-b border-gray-100 pr-10">
                 <div>
-                  <h3 className="font-bold text-lg text-gray-800">{order.customer}</h3>
+                  <h3 className="font-bold text-lg text-gray-800 capitalize">{order.customer}</h3>
                   <span className="text-xs text-gray-400">...{order.id.slice(-5)} • {order.displayTime}</span>
                 </div>
                 <div className="text-right">
@@ -546,6 +759,32 @@ const App = () => {
   };
 
   const SellerStock = () => {
+    // STATE UNTUK TAMBAH MENU
+    const [isAdding, setIsAdding] = useState(false);
+    const [newItem, setNewItem] = useState({ name: '', price: '', stock: '', description: '' });
+
+    // FUNGSI SIMPAN MENU BARU
+    const handleAddNewMenu = async () => {
+      if (!newItem.name || !newItem.price) {
+        alert("Nama dan Harga wajib diisi!");
+        return;
+      }
+      
+      const newProduct = {
+        name: newItem.name,
+        price: Number(newItem.price),
+        stock: Number(newItem.stock) || 0,
+        description: newItem.description,
+        color: 'bg-green-50', // Default background warna
+        sortOrder: products.length + 1
+      };
+
+      await addDoc(collection(db, "products"), newProduct);
+      setIsAdding(false);
+      setNewItem({ name: '', price: '', stock: '', description: '' });
+      alert("Menu baru berhasil ditambahkan!");
+    };
+
     return (
       <div className="min-h-screen bg-gray-100 flex flex-col">
        <div className="bg-white p-4 shadow-sm flex items-center gap-4 sticky top-0 z-10">
@@ -553,11 +792,36 @@ const App = () => {
           <h1 className="font-bold text-lg text-gray-800">Manajemen Stok</h1>
         </div>
         <div className="p-4 space-y-4">
+          
+          {/* TOMBOL TAMBAH MENU BARU */}
+          {!isAdding ? (
+            <button 
+              onClick={() => setIsAdding(true)} 
+              className="w-full bg-red-100 text-red-600 font-bold py-3 rounded-xl hover:bg-red-200 flex justify-center items-center gap-2 border border-red-200 border-dashed"
+            >
+              <Plus size={20} /> Tambah Menu Baru
+            </button>
+          ) : (
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 space-y-3">
+              <div className="flex justify-between items-center border-b pb-2">
+                 <h3 className="font-bold text-gray-800">Detail Menu Baru</h3>
+                 <button onClick={() => setIsAdding(false)} className="text-gray-400 hover:text-red-500"><X size={20}/></button>
+              </div>
+              <input type="text" placeholder="Nama Menu (Cont. Onigiri Tamago)" className="w-full border border-gray-300 p-2 rounded-lg text-sm outline-none focus:border-red-500" value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})} />
+              <input type="number" placeholder="Harga (Contoh: 15000)" className="w-full border border-gray-300 p-2 rounded-lg text-sm outline-none focus:border-red-500" value={newItem.price} onChange={e => setNewItem({...newItem, price: e.target.value})} />
+              <input type="number" placeholder="Stok Awal (Contoh: 20)" className="w-full border border-gray-300 p-2 rounded-lg text-sm outline-none focus:border-red-500" value={newItem.stock} onChange={e => setNewItem({...newItem, stock: e.target.value})} />
+              <textarea placeholder="Deskripsi isi makanan (opsional)" className="w-full border border-gray-300 p-2 rounded-lg text-sm outline-none focus:border-red-500" value={newItem.description} onChange={e => setNewItem({...newItem, description: e.target.value})} rows={2}></textarea>
+              <button onClick={handleAddNewMenu} className="w-full bg-green-600 text-white py-3 rounded-lg font-bold flex justify-center items-center gap-2 hover:bg-green-700">
+                <Save size={18} /> Simpan Menu
+              </button>
+            </div>
+          )}
+
+          {/* LIST MENU YANG ADA */}
           {products.map(product => (
             <div key={product.id} className="bg-white p-6 rounded-xl shadow-sm flex justify-between items-center">
               <div className="flex items-center gap-4">
                 <div className={`w-12 h-12 ${product.color} rounded-lg flex items-center justify-center text-xl overflow-hidden`}>
-                   {/* UPDATED: Gambar di list stok juga */}
                    <img src={getProductImage(product.name)} alt={product.name} className="w-full h-full object-cover" />
                 </div>
                 <div>
@@ -591,6 +855,7 @@ const App = () => {
       {currentScreen === 's_home' && <SellerHome />}
       {currentScreen === 's_orders' && <SellerOrders />}
       {currentScreen === 's_stock' && <SellerStock />}
+      {currentScreen === 's_users' && <SellerUsers />}
     </div>
   );
 };
