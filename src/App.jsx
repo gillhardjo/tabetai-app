@@ -1,863 +1,1058 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
-  User, Lock, ShoppingBag, ChefHat, ArrowLeft, 
-  CreditCard, Clock, Package, LogOut, Plus, Minus, QrCode, Trash2, Users, Pencil, MessageCircle, Download, Save, X 
+  ShoppingCart, MessageCircle, ChevronLeft, 
+  Plus, Minus, X, Download, Clock, Store, 
+  Utensils, User, Phone, Users, UtensilsCrossed, 
+  ScrollText, Edit2, Save, Trash2, LogOut, Eye, EyeOff, Tag, Search, Filter, GripVertical
 } from 'lucide-react';
 
 // --- FIREBASE IMPORTS ---
-import { initializeApp } from "firebase/app";
+import { initializeApp } from 'firebase/app';
+import { getAnalytics } from "firebase/analytics";
 import { 
-  getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, 
-  onSnapshot, query, where, getDocs, setDoc 
-} from "firebase/firestore";
+  getFirestore, collection, doc, addDoc, 
+  updateDoc, deleteDoc, onSnapshot 
+} from 'firebase/firestore';
 
-// --- KONFIGURASI FIREBASE ---
+// ==========================================
+// 1. MASUKKAN CONFIG FIREBASE ANDA DI SINI
+// ==========================================
 const firebaseConfig = {
-  apiKey: "AIzaSyABbWLb_tUSfVVHTXokcnX7m1aJLR16M5M",
-  authDomain: "tabetai-app-4cd22.firebaseapp.com",
-  projectId: "tabetai-app-4cd22",
-  storageBucket: "tabetai-app-4cd22.firebasestorage.app",
-  messagingSenderId: "314181871660",
-  appId: "1:314181871660:web:923c4db17c9531f7468989"
+  apiKey: "AIzaSyAwsfBMS0_9gbPayYU-Ry2iFNfF8TMMKVU",
+  authDomain: "tabetai-app-v103.firebaseapp.com",
+  projectId: "tabetai-app-v103",
+  storageBucket: "tabetai-app-v103.firebasestorage.app",
+  messagingSenderId: "555178920953",
+  appId: "1:555178920953:web:96ab92b21b8212c57a0b28",
+  measurementId: "G-6189BCY5YH"
 };
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);
 const db = getFirestore(app);
 
-const App = () => {
-  // --- STATE ---
-  const [currentScreen, setCurrentScreen] = useState('login'); 
-  const [currentUser, setCurrentUser] = useState(null); 
-  
-  // Data Realtime dari Firebase
-  const [products, setProducts] = useState([]);
-  const [orders, setOrders] = useState([]);
-  const [cart, setCart] = useState([]);
-  const [usersList, setUsersList] = useState([]); 
+// --- INITIAL SHARED DATA ---
+const ADMIN_CREDENTIALS = {
+  username: 'gillhardjo',
+  phone: '081285557779'
+};
 
-  // Helper Format Rupiah
-  const formatRupiah = (num) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(num);
+// Image URLs & WhatsApp
+const qrisImageUrl = "https://github.com/gillhardjo/tabetai-app/blob/main/public/qris.png?raw=true";
+const logoImageUrl = "https://github.com/gillhardjo/tabetai-app/blob/main/public/logo.png?raw=true";
+const ADMIN_WA_NUMBER = "6281285557779"; 
 
-  // Helper Gambar (Diperbarui agar mendeteksi nama gambar otomatis)
-  const getProductImage = (productName) => {
-    if (!productName) return '/logo.png';
-    const name = productName.toLowerCase();
-    
-    if (name.includes('salmon')) return '/salmon.png';
-    if (name.includes('tuna')) return '/tuna.png';
-    if (name.includes('chicken')) return '/chicken.png';
-    
-    // Logika Otomatis untuk menu baru: Ambil kata kedua dari nama menu
-    // Contoh: "Onigiri Tamago" -> akan mencari file "/tamago.png"
-    const words = name.split(' ');
-    if (words.length > 1) {
-      return `/${words[1]}.png`;
+// --- UTILS ---
+const formatRp = (angka) => {
+  return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(angka);
+};
+
+const generateInvoiceWAUrl = (order, userPhone) => {
+    const itemsText = order.items.map(i => `- ${i.quantity}x ${i.name} (${i.variant})${i.note ? ` [Note: ${i.note}]` : ''}: ${formatRp(i.price * i.quantity)}`).join('%0A');
+    let discountText = '';
+    if (order.discount && order.discount.value > 0) {
+      discountText = `%0A*Diskon Promo (${order.discount.code}):* -${formatRp(order.discount.value)}`;
     }
+    const text = `*INVOICE TABETAI*%0A%0AOrder ID: ${order.id}%0ATanggal: ${order.date}%0ANama: ${order.customer}%0A%0A*Detail Pesanan:*%0A${itemsText}%0A%0A*Subtotal:* ${formatRp(order.originalTotal)}${discountText}%0A*TOTAL TAGIHAN:* ${formatRp(order.total)}%0A%0A*Poin Didapat:* +${order.earnedPoints} Poin%0A%0ATerima kasih telah memesan di Tabetai!`;
+    
+    // Format nomor HP agar sesuai standar WhatsApp API (Ganti awalan 0 menjadi 62)
+    let waNumber = userPhone || "";
+    waNumber = waNumber.replace(/[^\d+]/g, ''); 
+    if (waNumber.startsWith('0')) waNumber = '62' + waNumber.substring(1);
+    if (waNumber.startsWith('+')) waNumber = waNumber.substring(1);
 
-    return '/logo.png'; 
-  };
+    return `https://wa.me/${waNumber}?text=${text}`;
+};
 
-  // --- LOGIKA AUTO LOGOUT (30 MENIT) ---
+export default function TabetaiApp() {
+  // State tersinkronisasi Firebase
+  const [members, setMembers] = useState([]);
+  const [menus, setMenus] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [promos, setPromos] = useState([]);
+  
+  // State Navigasi
+  const [role, setRole] = useState('guest'); 
+  const [currentUser, setCurrentUser] = useState(null);
+  const [authView, setAuthView] = useState('login'); 
+  const [memberView, setMemberView] = useState('home'); 
+  const [adminView, setAdminView] = useState('dashboard');
+
+  const [cart, setCart] = useState([]);
+  const [selectedMenuItem, setSelectedMenuItem] = useState(null);
+
+  // Sync Data Realtime dari Firebase
   useEffect(() => {
-    const updateActivity = () => {
-      if (currentUser) {
-        localStorage.setItem('lastActivity', Date.now().toString());
-      }
-    };
-
-    window.addEventListener('mousemove', updateActivity);
-    window.addEventListener('keypress', updateActivity);
-    window.addEventListener('click', updateActivity);
-    window.addEventListener('touchstart', updateActivity); 
-
-    const checkInactivity = setInterval(() => {
-      const lastActivity = localStorage.getItem('lastActivity');
-      if (lastActivity && currentUser) {
-        const diff = Date.now() - parseInt(lastActivity, 10);
-        if (diff > 30 * 60 * 1000) {
-          alert('Sesi Anda telah berakhir karena tidak aktif selama 30 menit.');
-          setCurrentUser(null);
-          setCurrentScreen('login');
-          setCart([]);
-          localStorage.removeItem('lastActivity');
-        }
-      }
-    }, 60000); 
-
-    if (currentUser) updateActivity();
-
-    return () => {
-      window.removeEventListener('mousemove', updateActivity);
-      window.removeEventListener('keypress', updateActivity);
-      window.removeEventListener('click', updateActivity);
-      window.removeEventListener('touchstart', updateActivity);
-      clearInterval(checkInactivity);
-    };
-  }, [currentUser]);
-
-  // --- REALTIME LISTENERS ---
-  useEffect(() => {
-    const unsubProducts = onSnapshot(collection(db, "products"), (snapshot) => {
-      const productsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      if (productsData.length === 0) {
-        seedDatabase();
-      } else {
-        setProducts(productsData.sort((a,b) => a.sortOrder - b.sortOrder));
-      }
-    });
-
-    const qOrders = query(collection(db, "orders"));
-    const unsubOrders = onSnapshot(qOrders, (snapshot) => {
-      const ordersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setOrders(ordersData.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp)));
-    });
-
-    const qUsers = query(collection(db, "users"));
-    const unsubUsers = onSnapshot(qUsers, (snapshot) => {
-      const usersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setUsersList(usersData.filter(u => u.role === 'customer'));
-    });
-
-    return () => {
-      unsubProducts();
-      unsubOrders();
-      unsubUsers();
-    };
+    const unsubMembers = onSnapshot(collection(db, 'members'), snap => setMembers(snap.docs.map(d => ({ ...d.data(), dbId: d.id }))));
+    const unsubMenus = onSnapshot(collection(db, 'menus'), snap => setMenus(snap.docs.map(d => ({ ...d.data(), dbId: d.id }))));
+    const unsubOrders = onSnapshot(collection(db, 'orders'), snap => setOrders(snap.docs.map(d => ({ ...d.data(), dbId: d.id }))));
+    const unsubPromos = onSnapshot(collection(db, 'promos'), snap => setPromos(snap.docs.map(d => ({ ...d.data(), dbId: d.id }))));
+    
+    return () => { unsubMembers(); unsubMenus(); unsubOrders(); unsubPromos(); };
   }, []);
 
-  const seedDatabase = async () => {
-    console.log("Seeding database...");
-    const initialProducts = [
-      { 
-        name: 'Onigiri Salmon Mayo', 
-        price: 15000, 
-        color: 'bg-red-50', 
-        stock: 30, 
-        sortOrder: 1,
-        description: "cooked salmon, kewpie mayo, bonito furikake, rice, nori"
-      },
-      { 
-        name: 'Onigiri Tuna Mayo', 
-        price: 12000, 
-        color: 'bg-blue-100', 
-        stock: 30, 
-        sortOrder: 2,
-        description: "cooked tuna, kewpie mayo, bonito furikake, rice, nori"
-      },
-      { 
-        name: 'Onigiri Chicken Spam', 
-        price: 12000, 
-        color: 'bg-red-100', 
-        stock: 30, 
-        sortOrder: 3,
-        description: "house chicken spam, sweet house sauce, kewpie mayo, bonito furikake, rice, nori"
-      },
-    ];
-    for (const p of initialProducts) {
-      await addDoc(collection(db, "products"), p);
+  // Update current user data (points) real-time
+  const activeUser = currentUser ? members.find(m => m.phone === currentUser.phone && m.name.toLowerCase() === currentUser.name.toLowerCase()) || currentUser : null;
+
+  const handleLogin = (name, phone) => {
+    if (name.toLowerCase() === ADMIN_CREDENTIALS.username.toLowerCase() && phone === ADMIN_CREDENTIALS.phone) {
+      setRole('admin');
+      setCurrentUser({ name: 'Admin Tabetai', phone });
+      setAdminView('dashboard');
+      return;
     }
+    
+    const existingMember = members.find(m => m.name.toLowerCase() === name.toLowerCase() && m.phone === phone);
+    if (existingMember) {
+      setRole('member');
+      setCurrentUser(existingMember);
+      setMemberView('home');
+      return;
+    }
+    alert('Akun tidak ditemukan atau salah. Silakan periksa kembali atau lakukan Registrasi.');
   };
 
-  // --- LOGIKA AUTHENTICATION ---
-  const handleLogin = async (username, pin, isRegistering) => {
-    if (!username || !pin) return alert("Isi username dan PIN");
-
-    const normalizedUsername = username.toLowerCase();
-
-    if (normalizedUsername === 'gillhardjo' && pin === '2131') {
-      setCurrentUser({ username: 'gillhardjo', role: 'seller' });
-      setCurrentScreen('s_home');
+  const handleRegister = async (name, phone) => {
+    if(name.toLowerCase() === ADMIN_CREDENTIALS.username.toLowerCase()) {
+      alert('Username ini tidak dapat digunakan.');
+      return;
+    }
+    const existingMember = members.find(m => m.name.toLowerCase() === name.toLowerCase() && m.phone === phone);
+    if(existingMember) {
+      alert('Akun sudah terdaftar. Silakan login.');
       return;
     }
 
-    const usersRef = collection(db, "users");
-    
-    if (isRegistering) {
-      const q = query(usersRef, where("username", "==", normalizedUsername));
-      const querySnapshot = await getDocs(q);
+    try {
+      const newMemberData = { id: Date.now(), name, phone, points: 0 };
+      const res = await addDoc(collection(db, 'members'), newMemberData);
       
-      if (!querySnapshot.empty) {
-        alert('Username sudah dipakai!');
-      } else {
-        await addDoc(usersRef, { username: normalizedUsername, pin, role: 'customer' });
-        setCurrentUser({ username: normalizedUsername, pin, role: 'customer' });
-        setCurrentScreen('c_home');
-      }
-    } else {
-      const q = query(usersRef, where("username", "==", normalizedUsername), where("pin", "==", pin));
-      const querySnapshot = await getDocs(q);
-      
-      if (!querySnapshot.empty) {
-        const userData = querySnapshot.docs[0].data();
-        setCurrentUser(userData);
-        setCurrentScreen('c_home');
-      } else {
-        alert('Username atau PIN salah, atau belum terdaftar.');
-      }
+      setRole('member');
+      setCurrentUser({ ...newMemberData, dbId: res.id });
+      setMemberView('home');
+    } catch (e) {
+      alert("Gagal menyambung ke database. Pastikan koneksi internet stabil.");
+      console.error(e);
     }
   };
 
-  // --- LOGIKA CART & CHECKOUT ---
-  const addToCart = (product, variant, note, qty) => {
-    setCart(prevCart => {
-      const existingItemIndex = prevCart.findIndex(item => 
-        item.productId === product.id && 
-        item.variant === variant && 
-        item.note.trim().toLowerCase() === note.trim().toLowerCase()
-      );
-
-      if (existingItemIndex !== -1) {
-        const newCart = [...prevCart];
-        newCart[existingItemIndex].qty += qty;
-        return newCart;
-      } else {
-        return [...prevCart, {
-          productId: product.id,
-          name: product.name,
-          price: product.price,
-          variant,
-          note,
-          qty
-        }];
-      }
-    });
-  };
-
-  const handleCheckout = async () => {
-    if (cart.length === 0) return;
-
-    const newOrder = {
-      customer: currentUser.username,
-      items: cart,
-      total: cart.reduce((acc, item) => acc + (item.price * item.qty), 0),
-      status: 'Menunggu Verifikasi',
-      timestamp: new Date().toISOString(),
-      displayTime: new Date().toLocaleString(),
-      paymentMethod: 'QRIS'
-    };
-
-    await addDoc(collection(db, "orders"), newOrder);
+  const handleLogout = () => {
+    setRole('guest');
+    setCurrentUser(null);
+    setAuthView('login');
     setCart([]);
-    setCurrentScreen('c_status');
   };
 
-  // --- LOGIKA SELLER (UPDATE STATUS, STOK, USER) ---
-  const updateStatus = async (orderId, newStatus) => {
-    const orderRef = doc(db, "orders", orderId);
-    const orderCurrent = orders.find(o => o.id === orderId);
+  const addToCart = (item, variantName, quantity, note) => {
+    setCart(prev => {
+      const existing = prev.findIndex(i => (i.dbId === item.dbId || i.id === item.id) && i.variant === variantName && i.note === note);
+      if (existing > -1) {
+        const newCart = [...prev];
+        newCart[existing].quantity += quantity;
+        return newCart;
+      }
+      return [...prev, { ...item, variant: variantName, quantity, note, cartId: Date.now() }];
+    });
+    setSelectedMenuItem(null);
+  };
+
+  const updateCartQty = (cartId, delta) => {
+    setCart(prev => prev.map(item => {
+      if (item.cartId === cartId) {
+        const newQty = item.quantity + delta;
+        return newQty > 0 ? { ...item, quantity: newQty } : null;
+      }
+      return item;
+    }).filter(Boolean));
+  };
+
+  const getCartTotal = () => cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+  const getCartCount = () => cart.reduce((sum, item) => sum + item.quantity, 0);
+
+  const placeOrder = async (finalTotal, discountObj) => {
+    const earnedPoints = Math.floor(finalTotal * 0.1); 
+    const newOrderData = {
+      id: `TBT-${Math.floor(Math.random() * 10000)}`,
+      customer: activeUser.name,
+      customerPhone: activeUser.phone,
+      items: [...cart],
+      total: finalTotal,
+      originalTotal: getCartTotal(),
+      discount: discountObj,
+      earnedPoints: earnedPoints,
+      status: 'Menunggu Pembayaran',
+      date: new Date().toLocaleString('id-ID')
+    };
     
-    if (newStatus === 'Pembayaran Diterima' && orderCurrent.status !== 'Pembayaran Diterima') {
-      for (const item of orderCurrent.items) {
-        const productRefInDb = products.find(p => p.id === item.productId);
-        if (productRefInDb) {
-          const productDocRef = doc(db, "products", item.productId);
-          const newStock = Math.max(0, productRefInDb.stock - item.qty);
-          await updateDoc(productDocRef, { stock: newStock });
-        }
-      }
-    }
-    await updateDoc(orderRef, { status: newStatus });
-  };
-
-  const handleDeleteOrder = async (orderId) => {
-    if (window.confirm("Apakah Anda yakin ingin menghapus pesanan ini dari riwayat?")) {
-      await deleteDoc(doc(db, "orders", orderId));
-    }
-  };
-
-  const updateStockManual = async (productId, delta) => {
-    const product = products.find(p => p.id === productId);
-    if(product) {
-       const productRef = doc(db, "products", productId);
-       await updateDoc(productRef, { stock: Math.max(0, product.stock + delta) });
-    }
-  };
-
-  const handleDeleteUser = async (userId) => {
-    if (window.confirm("Yakin ingin menghapus member ini? Data tidak bisa dikembalikan.")) {
-      await deleteDoc(doc(db, "users", userId));
-    }
-  };
-
-  const handleUpdatePin = async (userId, currentPin) => {
-    const newPin = window.prompt("Masukkan PIN baru untuk member ini:", currentPin);
-    if (newPin && newPin !== currentPin) {
-      await updateDoc(doc(db, "users", userId), { pin: newPin });
-      alert("PIN berhasil diubah!");
-    }
-  };
-
-  // --- COMPONENTS UI ---
-
-  const LoginScreen = () => {
-    const [username, setUsername] = useState('');
-    const [pin, setPin] = useState('');
-    const [isRegister, setIsRegister] = useState(false);
-
-    const handleKeyDown = (e) => {
-      if (e.key === 'Enter') handleLogin(username, pin, isRegister);
-    };
-
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50 p-6">
-        <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm">
-          <div className="flex justify-center mb-6">
-            <div className="w-32 h-32 bg-red-50 rounded-full flex items-center justify-center overflow-hidden border-4 border-red-100">
-               <img src="/logo.png" alt="Logo Tabetai" className="w-full h-full object-cover" />
-            </div>
-          </div>
-          <h2 className="text-2xl font-bold text-center text-gray-800 mb-2">Tabetai</h2>
-          <p className="text-center text-gray-500 mb-8">{isRegister ? 'Registrasi Akun Baru' : 'Oishii Onigiri'}</p>
-
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
-              <div className="relative">
-                <User className="absolute left-3 top-3 text-gray-400" size={18} />
-                <input type="text" value={username} onChange={(e) => setUsername(e.target.value)} onKeyDown={handleKeyDown} className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-red-500 outline-none" placeholder="Nama Pengguna" />
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">PIN Code (4 digit)</label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-3 text-gray-400" size={18} />
-                <input 
-                  type="password" 
-                  value={pin} 
-                  onChange={(e) => setPin(e.target.value)} 
-                  onKeyDown={handleKeyDown} 
-                  className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-red-500 outline-none" 
-                  placeholder="****" 
-                  maxLength={4} 
-                />
-              </div>
-            </div>
-            <button onClick={() => handleLogin(username, pin, isRegister)} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl transition-colors shadow-lg shadow-red-200">{isRegister ? 'Daftar Sekarang' : 'Masuk'}</button>
-          </div>
-          <div className="mt-6 text-center">
-            <button onClick={() => setIsRegister(!isRegister)} className="text-sm text-red-600 font-semibold hover:underline">{isRegister ? 'Sudah punya akun? Login' : 'Belum punya akun? Registrasi'}</button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const CustomerMenu = () => {
-    const [selections, setSelections] = useState({});
-
-    const handleSelectionChange = (id, field, value) => {
-      setSelections(prev => {
-        const currentSelection = prev[id] || { variant: 'Original', note: '', qty: 1 };
-        return { ...prev, [id]: { ...currentSelection, [field]: value } };
-      });
-    };
-
-    const adjustQty = (id, delta, maxStock) => {
-      setSelections(prev => {
-        const currentSelection = prev[id] || { variant: 'Original', note: '', qty: 1 };
-        let newQty = currentSelection.qty + delta;
-        newQty = Math.max(1, Math.min(newQty, maxStock));
-        return { ...prev, [id]: { ...currentSelection, qty: newQty } };
-      });
-    };
-
-    return (
-      <div className="min-h-screen bg-gray-50 pb-24">
-        <div className="bg-white p-4 shadow-sm sticky top-0 z-10 flex items-center gap-4">
-          <button onClick={() => setCurrentScreen('c_home')}><ArrowLeft /></button>
-          <h1 className="font-bold text-lg">Pilih Menu</h1>
-        </div>
-        <div className="p-4 space-y-6">
-          {products.length === 0 && <p className="text-center mt-10">Memuat Menu...</p>}
-          {products.map(product => {
-             const selection = selections[product.id] || { variant: 'Original', note: '', qty: 1 };
-             const desc = product.description || "";
-             
-             // LOGIKA STOK
-             const isSoldOut = product.stock === 0;
-             const isLowStock = product.stock > 0 && product.stock < 5;
-             const isHighStock = product.stock > 10;
-
-             return (
-              <div key={product.id} className={`bg-white rounded-2xl shadow-sm overflow-hidden border ${isSoldOut ? 'border-gray-200 opacity-70' : 'border-gray-100'}`}>
-                <div className={`aspect-square w-full ${product.color} flex items-center justify-center relative group overflow-hidden`}>
-                  {isSoldOut && (
-                    <div className="absolute inset-0 bg-black/60 z-20 flex items-center justify-center">
-                      <span className="text-white font-black text-3xl tracking-wider border-4 border-white p-2 rounded transform -rotate-12">SOLD OUT</span>
-                    </div>
-                  )}
-                  <img 
-                    src={getProductImage(product.name)} 
-                    alt={product.name} 
-                    className={`w-full h-full object-cover transition-transform duration-300 ${!isSoldOut && 'hover:scale-110'} ${isSoldOut && 'grayscale'}`}
-                    onError={(e) => {
-                      e.target.onerror = null; 
-                      e.target.src = "https://placehold.co/300x300/png?text=No+Image";
-                    }}
-                  />
-                </div>
-                <div className="p-4">
-                  <div className="flex justify-between items-start mb-1">
-                    <div>
-                      <h3 className="font-bold text-lg text-gray-800 leading-tight">{product.name}</h3>
-                      {isLowStock && <p className="text-xs text-red-500 font-bold animate-pulse mt-1">Low Stock: Tersisa {product.stock}!</p>}
-                      {isHighStock && <p className="text-xs text-green-600 font-bold mt-1">Available</p>}
-                      {!isSoldOut && !isLowStock && !isHighStock && <p className="text-xs text-green-600 mt-1">Stok: {product.stock}</p>}
-                    </div>
-                    <span className="font-bold text-red-600 whitespace-nowrap ml-2">{formatRupiah(product.price)}</span>
-                  </div>
-                  
-                  <p className="text-xs text-gray-500 mb-4 leading-relaxed">{desc}</p>
-
-                  <div className="mb-3">
-                    <p className="text-xs font-bold text-gray-500 mb-1">Varian:</p>
-                    <div className="flex gap-2">
-                      {['Original', 'Spicy'].map(v => (
-                        <label key={v} className={`flex items-center gap-1 text-sm ${isSoldOut ? 'cursor-not-allowed text-gray-400' : 'cursor-pointer'}`}>
-                          <input 
-                            type="radio" 
-                            name={`variant-${product.id}`} 
-                            checked={selection.variant === v} 
-                            onChange={() => !isSoldOut && handleSelectionChange(product.id, 'variant', v)} 
-                            disabled={isSoldOut}
-                            className="accent-red-600" 
-                          />{v}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="mb-4">
-                    <input 
-                      type="text" 
-                      placeholder={isSoldOut ? "Tidak tersedia" : "Catatan (opsional)..."}
-                      value={selection.note} 
-                      disabled={isSoldOut}
-                      className="w-full text-sm border-b border-gray-200 py-1 focus:border-red-500 outline-none bg-transparent disabled:bg-gray-50" 
-                      onChange={(e) => handleSelectionChange(product.id, 'note', e.target.value)} 
-                    />
-                  </div>
-                  <div className="flex items-center gap-3">
-                     <div className={`flex items-center bg-gray-100 rounded-lg h-12 ${isSoldOut ? 'opacity-50' : ''}`}>
-                        <button 
-                          onClick={() => adjustQty(product.id, -1, product.stock)} 
-                          disabled={isSoldOut}
-                          className="w-10 h-full flex items-center justify-center hover:bg-gray-200 rounded-l-lg disabled:hover:bg-transparent"
-                        >
-                          <Minus size={16} />
-                        </button>
-                        <span className="w-8 text-center font-bold text-sm">{selection.qty}</span>
-                        <button 
-                          onClick={() => adjustQty(product.id, 1, product.stock)} 
-                          disabled={isSoldOut || selection.qty >= product.stock}
-                          className="w-10 h-full flex items-center justify-center hover:bg-gray-200 rounded-r-lg disabled:hover:bg-transparent disabled:text-gray-400"
-                        >
-                          <Plus size={16} />
-                        </button>
-                     </div>
-                    <button 
-                      onClick={() => {
-                        addToCart(product, selection.variant, selection.note, selection.qty);
-                        handleSelectionChange(product.id, 'qty', 1);
-                        handleSelectionChange(product.id, 'note', '');
-                      }}
-                      disabled={isSoldOut}
-                      className={`flex-1 text-white h-12 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 ${isSoldOut ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-800 hover:bg-red-700 active:scale-95'}`}
-                    >
-                      {isSoldOut ? 'Habis' : <><Plus size={18} /> Keranjang</>}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        {cart.length > 0 && (
-          <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-white via-white to-transparent">
-             <button onClick={() => setCurrentScreen('c_cart')} className="w-full bg-red-600 text-white p-4 rounded-2xl shadow-lg flex justify-between items-center font-bold">
-               <div className="flex items-center gap-2">
-                 <div className="bg-white/20 px-2 py-1 rounded text-sm">{cart.reduce((a,b)=>a+b.qty,0)} item</div>
-                 <span>Total {formatRupiah(cart.reduce((a, b) => a + (b.price * b.qty), 0))}</span>
-               </div>
-               <span className="flex items-center gap-1">Checkout <ArrowLeft className="rotate-180" size={18} /></span>
-             </button>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const CustomerHome = () => (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
-      <header className="bg-white p-4 shadow-sm flex justify-between items-center">
-        <div>
-          <h1 className="text-xl font-bold text-gray-800 capitalize">{currentUser.username}-san, Irasshaimase!</h1>
-          <p className="text-xs text-gray-500">Kyou, nani tabetai?</p>
-        </div>
-        <button onClick={() => setCurrentScreen('login')} className="text-gray-400 hover:text-red-500"><LogOut size={20} /></button>
-      </header>
-      <div className="flex-1 p-6 flex flex-col justify-center gap-6">
-        <button onClick={() => setCurrentScreen('c_menu')} className="bg-white p-8 rounded-2xl shadow-md border-l-8 border-red-500 flex items-center gap-6 hover:scale-105 transition-transform">
-          <ShoppingBag size={48} className="text-red-500" />
-          <div className="text-left">
-            <h2 className="text-2xl font-bold text-gray-800">Menu</h2>
-            <p className="text-gray-500">Pesan Onigiri favoritmu</p>
-          </div>
-        </button>
-        <button onClick={() => setCurrentScreen('c_status')} className="bg-white p-8 rounded-2xl shadow-md border-l-8 border-blue-500 flex items-center gap-6 hover:scale-105 transition-transform">
-          <Clock size={48} className="text-blue-500" />
-          <div className="text-left">
-            <h2 className="text-2xl font-bold text-gray-800">Status Pesanan</h2>
-            <p className="text-gray-500">Cek proses makananmu</p>
-          </div>
-        </button>
-      </div>
-
-      <div className="p-6 mt-auto">
-        <a 
-          href="https://wa.me/6281285557779?text=Halo%20Tabetai,%20saya%20ingin%20bertanya%20tentang%20menu."
-          target="_blank"
-          rel="noopener noreferrer"
-          className="bg-green-500 text-white p-4 rounded-xl shadow-lg flex items-center justify-center gap-2 font-bold hover:bg-green-600 transition-colors"
-        >
-          <MessageCircle size={24} />
-          Chat Seller (WhatsApp)
-        </a>
-      </div>
-    </div>
-  );
-
-  const CustomerCart = () => {
-    const total = cart.reduce((acc, item) => acc + (item.price * item.qty), 0);
-    return (
-      <div className="min-h-screen bg-gray-50 flex flex-col">
-        <div className="bg-white p-4 shadow-sm flex items-center gap-4">
-          <button onClick={() => setCurrentScreen('c_menu')}><ArrowLeft /></button>
-          <h1 className="font-bold text-lg">Konfirmasi Pesanan</h1>
-        </div>
-        <div className="flex-1 p-4 overflow-y-auto">
-          {cart.length === 0 ? <p className="text-center text-gray-500 mt-10">Keranjang kosong</p> : 
-          cart.map((item, idx) => (
-            <div key={idx} className="bg-white p-4 rounded-xl shadow-sm mb-3 flex justify-between items-start">
-              <div className="flex gap-3">
-                 <div className="bg-red-50 text-red-600 w-8 h-8 flex items-center justify-center rounded font-bold text-sm">{item.qty}x</div>
-                 <div>
-                    <h4 className="font-bold text-gray-800">{item.name}</h4>
-                    <p className="text-sm text-gray-500">Varian: <span className="text-red-600 font-medium">{item.variant}</span></p>
-                    {item.note && <p className="text-xs text-gray-400 italic">"{item.note}"</p>}
-                 </div>
-              </div>
-              <div className="text-right">
-                <p className="font-bold">{formatRupiah(item.price * item.qty)}</p>
-                <button onClick={() => setCart(prev => prev.filter((_, i) => i !== idx))} className="text-gray-400 hover:text-red-500 mt-1"><Trash2 size={16} /></button>
-              </div>
-            </div>
-          ))}
-          <div className="border-t-2 border-dashed border-gray-300 my-4"></div>
-          <div className="flex justify-between items-center text-xl font-bold text-gray-800"><span>Total Bayar</span><span>{formatRupiah(total)}</span></div>
-        </div>
-        <div className="p-4 bg-white border-t border-gray-100">
-          <button disabled={cart.length === 0} onClick={() => setCurrentScreen('c_payment')} className="w-full bg-red-600 text-white py-4 rounded-xl font-bold text-lg shadow-lg hover:bg-red-700 transition-colors disabled:bg-gray-300">Lanjut Pembayaran</button>
-        </div>
-      </div>
-    );
-  };
-
-  const PaymentScreen = () => (
-    <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center p-6">
-      <h2 className="text-2xl font-bold mb-8">Pembayaran QRIS</h2>
-      <div className="bg-white p-6 rounded-3xl mb-8 w-full max-w-xs aspect-square flex items-center justify-center relative overflow-hidden">
-        <img src="qris.png" alt="QRIS Code" className="w-full h-full object-contain" />
-      </div>
-      <p className="text-gray-400 mb-8 text-center max-w-xs">Scan QR code di atas menggunakan aplikasi E-Wallet pilihan Anda.</p>
+    try {
+      const res = await addDoc(collection(db, 'orders'), newOrderData);
       
-      <a 
-        href="/qris.png" 
-        download="QRIS_Tabetai.png"
-        className="text-sm text-gray-400 flex items-center gap-2 mb-8 hover:text-white transition-colors"
-      >
-        <Download size={16} /> Simpan Gambar QRIS
-      </a>
-
-      <button onClick={handleCheckout} className="w-full max-w-sm bg-red-500 hover:bg-red-600 text-white font-bold py-4 rounded-2xl transition-all active:scale-95 shadow-[0_0_20px_rgba(239,68,68,0.4)]">Bayar Sekarang</button>
-      <button onClick={() => setCurrentScreen('c_cart')} className="mt-4 text-gray-500 hover:text-white transition-colors">Batalkan</button>
-    </div>
-  );
-
-  const CustomerOrderStatus = () => {
-    const myOrders = orders.filter(o => o.customer === currentUser.username);
-    return (
-      <div className="min-h-screen bg-gray-50 flex flex-col">
-        <div className="bg-white p-4 shadow-sm flex items-center gap-4">
-          <button onClick={() => setCurrentScreen('c_home')}><ArrowLeft /></button>
-          <h1 className="font-bold text-lg">Riwayat Pesanan</h1>
-        </div>
-        <div className="flex-1 p-4 overflow-y-auto space-y-4">
-          {myOrders.length === 0 ? <div className="text-center text-gray-400 mt-20">Belum ada pesanan aktif.</div> : (
-            myOrders.map(order => (
-              <div key={order.id} className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
-                <div className="flex justify-between items-start mb-4">
-                  <div>
-                    <span className="text-xs font-bold text-gray-400">Order ID: ...{order.id.slice(-5)}</span>
-                    <p className="text-xs text-gray-300">{order.displayTime}</p>
-                  </div>
-                  <span className={`px-3 py-1 rounded-full text-xs font-bold ${order.status === 'Menunggu Verifikasi' ? 'bg-yellow-100 text-yellow-700' : order.status === 'Pembayaran Diterima' ? 'bg-blue-100 text-blue-700' : order.status === 'Pesanan Dibuat' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>{order.status}</span>
-                </div>
-                <div className="space-y-2 mb-4">
-                  {order.items.map((item, i) => (
-                    <div key={i} className="flex justify-between text-sm">
-                      <span className="text-gray-600">{item.qty}x {item.name} ({item.variant})</span>
-                    </div>
-                  ))}
-                </div>
-                <div className="border-t border-gray-100 pt-3 flex justify-between items-center font-bold text-gray-800">
-                  <span>Total</span><span>{formatRupiah(order.total)}</span>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-
-        <div className="p-6 mt-auto bg-white border-t border-gray-200">
-          <a 
-            href="https://wa.me/6281285557779?text=Halo%20Tabetai,%20saya%20sudah%20melakukan%20pembayaran%20via%20QRIS,%20mohon%20dicek."
-            target="_blank"
-            rel="noopener noreferrer"
-            className="w-full bg-green-500 text-white p-4 rounded-xl shadow-lg flex items-center justify-center gap-2 font-bold hover:bg-green-600 transition-colors"
-          >
-            <MessageCircle size={24} />
-            Konfirmasi Pembayaran
-          </a>
-        </div>
-      </div>
-    );
-  };
-
-  const SellerHome = () => (
-    <div className="min-h-screen bg-gray-800 text-white flex flex-col">
-      <header className="p-6 flex justify-between items-center bg-gray-900 shadow-lg">
-        <div>
-          <h1 className="text-2xl font-bold text-red-400">Seller Dashboard</h1>
-          <p className="text-sm text-gray-400">Konnichiwa, Gillhardjo!</p>
-        </div>
-        <button onClick={() => setCurrentScreen('login')} className="bg-gray-700 p-2 rounded-lg hover:bg-red-600 transition-colors"><LogOut size={20} /></button>
-      </header>
-      <div className="p-6 grid grid-cols-2 gap-6 mt-10">
-        <button onClick={() => setCurrentScreen('s_orders')} className="bg-gray-700 p-8 rounded-2xl flex flex-col items-center gap-4 hover:bg-gray-600 transition-colors border border-gray-600">
-          <div className="bg-red-500 p-4 rounded-full text-white"><Package size={40} /></div>
-          <span className="text-xl font-bold">Pesanan Masuk</span>
-          <span className="text-3xl font-bold">{orders.filter(o => o.status !== 'Pesanan Selesai').length}</span>
-        </button>
-        <button onClick={() => setCurrentScreen('s_stock')} className="bg-gray-700 p-8 rounded-2xl flex flex-col items-center gap-4 hover:bg-gray-600 transition-colors border border-gray-600">
-          <div className="bg-blue-500 p-4 rounded-full text-white"><ShoppingBag size={40} /></div>
-          <span className="text-xl font-bold">Stok Makanan</span>
-          <span className="text-sm text-gray-400">Cek & Edit Stok</span>
-        </button>
-        <button onClick={() => setCurrentScreen('s_users')} className="col-span-2 bg-gray-700 p-8 rounded-2xl flex flex-row items-center justify-center gap-4 hover:bg-gray-600 transition-colors border border-gray-600">
-           <div className="bg-purple-500 p-4 rounded-full text-white"><Users size={40} /></div>
-           <div className="text-left">
-             <span className="text-xl font-bold block">Daftar Member</span>
-             <span className="text-sm text-gray-400">{usersList.length} Terdaftar</span>
-           </div>
-        </button>
-      </div>
-    </div>
-  );
-
-  const SellerUsers = () => (
-    <div className="min-h-screen bg-gray-100 flex flex-col">
-       <div className="bg-white p-4 shadow-sm flex items-center gap-4 sticky top-0 z-10">
-          <button onClick={() => setCurrentScreen('s_home')} className="p-2 hover:bg-gray-100 rounded-full"><ArrowLeft /></button>
-          <h1 className="font-bold text-lg text-gray-800">Daftar Member</h1>
-        </div>
-        <div className="p-4 space-y-4">
-          {usersList.length === 0 && <p className="text-center text-gray-500 mt-10">Belum ada member terdaftar.</p>}
-          {usersList.map(user => (
-            <div key={user.id} className="bg-white p-4 rounded-xl shadow-sm flex items-center justify-between gap-4 border border-gray-200">
-               <div className="flex items-center gap-4">
-                  <div className="bg-purple-100 p-3 rounded-full text-purple-600">
-                    <User size={24} />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-gray-800 capitalize">{user.username}</h3>
-                    <p className="text-xs text-gray-500">PIN: {user.pin}</p>
-                  </div>
-               </div>
-               <div className="flex gap-2">
-                 <button 
-                    onClick={() => handleUpdatePin(user.id, user.pin)} 
-                    className="p-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-yellow-100 hover:text-yellow-600 transition-colors"
-                    title="Ubah PIN"
-                 >
-                    <Pencil size={20} />
-                 </button>
-                 <button 
-                    onClick={() => handleDeleteUser(user.id)} 
-                    className="p-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-red-100 hover:text-red-600 transition-colors"
-                    title="Hapus User"
-                 >
-                    <Trash2 size={20} />
-                 </button>
-               </div>
-            </div>
-          ))}
-        </div>
-    </div>
-  );
-
-  const SellerOrders = () => {
-    return (
-      <div className="min-h-screen bg-gray-100 flex flex-col">
-        <div className="bg-white p-4 shadow-sm flex items-center gap-4 sticky top-0 z-10">
-          <button onClick={() => setCurrentScreen('s_home')} className="p-2 hover:bg-gray-100 rounded-full"><ArrowLeft /></button>
-          <h1 className="font-bold text-lg text-gray-800">Daftar Pesanan</h1>
-        </div>
-        <div className="p-4 space-y-4">
-          {orders.length === 0 && <p className="text-center text-gray-500 mt-10">Belum ada pesanan.</p>}
-          {orders.map(order => (
-            <div key={order.id} className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 relative group">
-              <button 
-                onClick={() => handleDeleteOrder(order.id)}
-                className="absolute top-4 right-4 p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"
-                title="Hapus Pesanan"
-              >
-                <Trash2 size={20} />
-              </button>
-
-              <div className="flex justify-between items-start mb-4 pb-4 border-b border-gray-100 pr-10">
-                <div>
-                  <h3 className="font-bold text-lg text-gray-800 capitalize">{order.customer}</h3>
-                  <span className="text-xs text-gray-400">...{order.id.slice(-5)} • {order.displayTime}</span>
-                </div>
-                <div className="text-right">
-                  <p className="font-bold text-red-600">{formatRupiah(order.total)}</p>
-                  <p className="text-xs text-gray-500">{order.paymentMethod}</p>
-                </div>
-              </div>
-              <div className="mb-6 bg-gray-50 p-3 rounded-lg">
-                <p className="text-xs font-bold text-gray-500 mb-2 uppercase tracking-wide">Items:</p>
-                {order.items.map((item, i) => (
-                  <div key={i} className="text-sm text-gray-700 mb-1 flex justify-between">
-                     <span>• <b>{item.qty}x</b> {item.name} <span className="text-gray-400">({item.variant})</span></span>
-                     {item.note && <span className="text-xs italic bg-yellow-100 px-2 rounded text-yellow-800">{item.note}</span>}
-                  </div>
-                ))}
-              </div>
-              <div className="flex flex-col gap-2">
-                <p className="text-xs font-bold text-gray-500">Update Status:</p>
-                <div className="flex flex-wrap gap-2">
-                  <button onClick={() => updateStatus(order.id, 'Pembayaran Diterima')} disabled={order.status === 'Pembayaran Diterima'} className={`flex-1 py-2 px-3 rounded text-xs font-bold transition-colors ${order.status === 'Pembayaran Diterima' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600 hover:bg-blue-100'}`}>Terima Bayar</button>
-                  <button onClick={() => updateStatus(order.id, 'Pesanan Dibuat')} disabled={order.status === 'Pesanan Dibuat'} className={`flex-1 py-2 px-3 rounded text-xs font-bold transition-colors ${order.status === 'Pesanan Dibuat' ? 'bg-red-500 text-white' : 'bg-gray-200 text-gray-600 hover:bg-red-100'}`}>Dibuat</button>
-                  <button onClick={() => updateStatus(order.id, 'Pesanan Selesai')} disabled={order.status === 'Pesanan Selesai'} className={`flex-1 py-2 px-3 rounded text-xs font-bold transition-colors ${order.status === 'Pesanan Selesai' ? 'bg-green-600 text-white' : 'bg-gray-200 text-gray-600 hover:bg-green-100'}`}>Selesai</button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  };
-
-  const SellerStock = () => {
-    // STATE UNTUK TAMBAH MENU
-    const [isAdding, setIsAdding] = useState(false);
-    const [newItem, setNewItem] = useState({ name: '', price: '', stock: '', description: '' });
-
-    // FUNGSI SIMPAN MENU BARU
-    const handleAddNewMenu = async () => {
-      if (!newItem.name || !newItem.price) {
-        alert("Nama dan Harga wajib diisi!");
-        return;
+      // Update Poin Member
+      if (activeUser.dbId) {
+        await updateDoc(doc(db, 'members', activeUser.dbId), { points: (activeUser.points || 0) + earnedPoints });
       }
       
-      const newProduct = {
-        name: newItem.name,
-        price: Number(newItem.price),
-        stock: Number(newItem.stock) || 0,
-        description: newItem.description,
-        color: 'bg-green-50', // Default background warna
-        sortOrder: products.length + 1
-      };
-
-      await addDoc(collection(db, "products"), newProduct);
-      setIsAdding(false);
-      setNewItem({ name: '', price: '', stock: '', description: '' });
-      alert("Menu baru berhasil ditambahkan!");
-    };
-
-    return (
-      <div className="min-h-screen bg-gray-100 flex flex-col">
-       <div className="bg-white p-4 shadow-sm flex items-center gap-4 sticky top-0 z-10">
-          <button onClick={() => setCurrentScreen('s_home')} className="p-2 hover:bg-gray-100 rounded-full"><ArrowLeft /></button>
-          <h1 className="font-bold text-lg text-gray-800">Manajemen Stok</h1>
-        </div>
-        <div className="p-4 space-y-4">
-          
-          {/* TOMBOL TAMBAH MENU BARU */}
-          {!isAdding ? (
-            <button 
-              onClick={() => setIsAdding(true)} 
-              className="w-full bg-red-100 text-red-600 font-bold py-3 rounded-xl hover:bg-red-200 flex justify-center items-center gap-2 border border-red-200 border-dashed"
-            >
-              <Plus size={20} /> Tambah Menu Baru
-            </button>
-          ) : (
-            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 space-y-3">
-              <div className="flex justify-between items-center border-b pb-2">
-                 <h3 className="font-bold text-gray-800">Detail Menu Baru</h3>
-                 <button onClick={() => setIsAdding(false)} className="text-gray-400 hover:text-red-500"><X size={20}/></button>
-              </div>
-              <input type="text" placeholder="Nama Menu (Cont. Onigiri Tamago)" className="w-full border border-gray-300 p-2 rounded-lg text-sm outline-none focus:border-red-500" value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})} />
-              <input type="number" placeholder="Harga (Contoh: 15000)" className="w-full border border-gray-300 p-2 rounded-lg text-sm outline-none focus:border-red-500" value={newItem.price} onChange={e => setNewItem({...newItem, price: e.target.value})} />
-              <input type="number" placeholder="Stok Awal (Contoh: 20)" className="w-full border border-gray-300 p-2 rounded-lg text-sm outline-none focus:border-red-500" value={newItem.stock} onChange={e => setNewItem({...newItem, stock: e.target.value})} />
-              <textarea placeholder="Deskripsi isi makanan (opsional)" className="w-full border border-gray-300 p-2 rounded-lg text-sm outline-none focus:border-red-500" value={newItem.description} onChange={e => setNewItem({...newItem, description: e.target.value})} rows={2}></textarea>
-              <button onClick={handleAddNewMenu} className="w-full bg-green-600 text-white py-3 rounded-lg font-bold flex justify-center items-center gap-2 hover:bg-green-700">
-                <Save size={18} /> Simpan Menu
-              </button>
-            </div>
-          )}
-
-          {/* LIST MENU YANG ADA */}
-          {products.map(product => (
-            <div key={product.id} className="bg-white p-6 rounded-xl shadow-sm flex justify-between items-center">
-              <div className="flex items-center gap-4">
-                <div className={`w-12 h-12 ${product.color} rounded-lg flex items-center justify-center text-xl overflow-hidden`}>
-                   <img src={getProductImage(product.name)} alt={product.name} className="w-full h-full object-cover" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-gray-800">{product.name}</h3>
-                  <p className="text-sm text-gray-500">Harga: {formatRupiah(product.price)}</p>
-                </div>
-              </div>
-              <div className="flex flex-col items-center gap-2">
-                 <p className="text-xs text-gray-400">Sisa Stok</p>
-                 <div className="flex items-center gap-3">
-                    <button onClick={() => updateStockManual(product.id, -1)} className="w-8 h-8 rounded-full bg-gray-100 hover:bg-red-100 text-red-600 font-bold flex items-center justify-center"><Minus size={16} /></button>
-                    <span className={`text-xl font-bold w-8 text-center ${product.stock < 10 ? 'text-red-500' : 'text-gray-800'}`}>{product.stock}</span>
-                    <button onClick={() => updateStockManual(product.id, 1)} className="w-8 h-8 rounded-full bg-gray-100 hover:bg-green-100 text-green-600 font-bold flex items-center justify-center"><Plus size={16} /></button>
-                 </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
+      // Optimistic update
+      setOrders([{ ...newOrderData, dbId: res.id }, ...orders]);
+      setCart([]);
+      setMemberView('payment');
+    } catch (e) {
+      alert("Gagal memproses pesanan. Silakan coba lagi.");
+      console.error(e);
+    }
   };
 
   return (
-    <div className="font-sans text-gray-900 mx-auto max-w-md bg-white shadow-2xl min-h-screen overflow-hidden relative">
-      {currentScreen === 'login' && <LoginScreen />}
-      {currentScreen === 'c_home' && <CustomerHome />}
-      {currentScreen === 'c_menu' && <CustomerMenu />}
-      {currentScreen === 'c_cart' && <CustomerCart />}
-      {currentScreen === 'c_payment' && <PaymentScreen />}
-      {currentScreen === 'c_status' && <CustomerOrderStatus />}
-      {currentScreen === 's_home' && <SellerHome />}
-      {currentScreen === 's_orders' && <SellerOrders />}
-      {currentScreen === 's_stock' && <SellerStock />}
-      {currentScreen === 's_users' && <SellerUsers />}
+    <div className="w-full min-h-screen bg-gray-100 flex justify-center font-sans">
+      <div className="w-full max-w-md bg-white min-h-screen relative shadow-2xl flex flex-col overflow-hidden">
+        
+        {role === 'guest' && (
+          <div className="flex-1 flex flex-col justify-center px-8 bg-red-50">
+            <div className="text-center mb-10 animate-fade-in-up">
+              <div className="w-32 h-32 mx-auto mb-4 shadow-xl rounded-full overflow-hidden bg-white border-4 border-white flex items-center justify-center">
+                <img src={logoImageUrl} alt="Tabetai Logo" className="w-full h-full object-cover" onError={(e) => { e.target.src = 'https://placehold.co/200x200/ef4444/ffffff?text=Tabetai'; }} />
+              </div>
+              <h1 className="text-3xl font-black text-red-600 tracking-tight mt-2">TABETAI</h1>
+              <p className="text-gray-600 mt-1 text-sm">Authentic Japanese Cuisine</p>
+            </div>
+            
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-red-100 animate-fade-in-up">
+              {authView === 'login' ? (
+                <>
+                  <h2 className="text-xl font-bold text-gray-800 mb-6 text-center">Masuk ke Akun</h2>
+                  <AuthForm onSubmit={handleLogin} btnText="Login" />
+                  <div className="mt-6 text-center text-sm">
+                    <p className="text-gray-500">Belum punya akun?</p>
+                    <button onClick={() => setAuthView('register')} className="text-red-600 font-bold mt-1 hover:underline">Registrasi Member Baru</button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <h2 className="text-xl font-bold text-gray-800 mb-6 text-center">Daftar Member</h2>
+                  <AuthForm onSubmit={handleRegister} btnText="Daftar Sekarang" />
+                  <div className="mt-6 text-center text-sm">
+                    <p className="text-gray-500">Sudah punya akun?</p>
+                    <button onClick={() => setAuthView('login')} className="text-red-600 font-bold mt-1 hover:underline">Login di sini</button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        {role === 'member' && (
+          <div className="flex-1 flex flex-col w-full h-full">
+            {memberView === 'home' && <MemberHome user={activeUser} onNavigate={setMemberView} onLogout={handleLogout} />}
+            {memberView === 'menu' && (
+              <MemberMenu 
+                menus={menus.filter(m => m.isActive !== false).sort((a,b) => (a.orderPriority || 99) - (b.orderPriority || 99))} 
+                onBack={() => setMemberView('home')} onSelectItem={setSelectedMenuItem}
+                cartCount={getCartCount()} cartTotal={getCartTotal()} onCheckout={() => setMemberView('checkout')}
+              />
+            )}
+            {memberView === 'checkout' && (
+              <MemberCheckout 
+                cart={cart} onBack={() => setMemberView('menu')} updateQty={updateCartQty} 
+                subtotal={getCartTotal()} onPay={placeOrder} promos={promos}
+              />
+            )}
+            {memberView === 'payment' && (
+              <MemberPayment 
+                onCheckStatus={() => setMemberView('status')} 
+                order={orders.filter(o => o.customer === activeUser.name)[0]}
+                userPhone={activeUser.phone}
+              />
+            )}
+            {memberView === 'status' && (
+              <MemberStatus 
+                orders={orders.filter(o => o.customer === activeUser.name)} 
+                onBack={() => setMemberView('home')} userPhone={activeUser.phone}
+              />
+            )}
+
+            {(memberView === 'home' || memberView === 'status') && (
+              <a href={`https://wa.me/${ADMIN_WA_NUMBER}?text=Halo%20Admin%20Tabetai,%20saya%20${activeUser.name}%20butuh%20bantuan.`} target="_blank" rel="noreferrer" className="absolute bottom-6 right-6 bg-green-500 text-white p-4 rounded-full shadow-lg hover:bg-green-600 transition-transform active:scale-95 z-50 flex items-center justify-center">
+                <MessageCircle size={28} />
+              </a>
+            )}
+            {selectedMenuItem && (
+              <VariantModal item={selectedMenuItem} onClose={() => setSelectedMenuItem(null)} onAdd={addToCart} />
+            )}
+          </div>
+        )}
+
+        {role === 'admin' && (
+          <div className="flex-1 flex flex-col w-full h-full bg-slate-100">
+             {adminView !== 'dashboard' && (
+              <div className="bg-slate-900 text-white p-4 flex items-center shadow-md z-20">
+                <button onClick={() => setAdminView('dashboard')} className="p-2 hover:bg-slate-800 rounded-full mr-2"><ChevronLeft size={24} /></button>
+                <h1 className="font-bold text-lg flex-1">
+                  {adminView === 'menus' && 'Manajemen Menu'}
+                  {adminView === 'orders' && 'Pesanan Masuk'}
+                  {adminView === 'members' && 'Daftar Member'}
+                  {adminView === 'promos' && 'Manajemen Promo'}
+                </h1>
+              </div>
+            )}
+
+            {adminView === 'dashboard' && (
+              <AdminDashboard onNavigate={setAdminView} onLogout={handleLogout} stats={{ orders: orders.length, menus: menus.length, members: members.length, promos: promos.length }} />
+            )}
+            {adminView === 'menus' && <AdminMenuManager menus={menus} />}
+            {adminView === 'orders' && <AdminOrderManager orders={orders} />}
+            {adminView === 'members' && <AdminMemberManager members={members} />}
+            {adminView === 'promos' && <AdminPromoManager promos={promos} />}
+          </div>
+        )}
+      </div>
     </div>
   );
-};
+}
 
-export default App;
+function AuthForm({ onSubmit, btnText }) {
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if(name && phone) onSubmit(name, phone);
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div>
+        <label className="block text-sm font-semibold text-gray-700 mb-1">Nama Lengkap / Username</label>
+        <div className="relative">
+          <User className="absolute left-3 top-3 text-gray-400" size={18} />
+          <input type="text" required value={name} onChange={(e) => setName(e.target.value)} placeholder="Contoh: Budi Santoso" className="w-full pl-10 pr-4 py-3 rounded-xl border border-gray-200 focus:border-red-500 focus:ring-2 focus:ring-red-200 outline-none transition-all" />
+        </div>
+      </div>
+      <div>
+        <label className="block text-sm font-semibold text-gray-700 mb-1">No. WhatsApp</label>
+        <div className="relative">
+          <Phone className="absolute left-3 top-3 text-gray-400" size={18} />
+          <input type="tel" required value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Contoh: 08123456789" className="w-full pl-10 pr-4 py-3 rounded-xl border border-gray-200 focus:border-red-500 focus:ring-2 focus:ring-red-200 outline-none transition-all" />
+        </div>
+      </div>
+      <button type="submit" className="w-full bg-red-600 text-white font-bold py-3.5 rounded-xl shadow-md hover:bg-red-700 active:scale-95 transition-all mt-4">{btnText}</button>
+    </form>
+  );
+}
+
+function MemberHome({ user, onNavigate, onLogout }) {
+  return (
+    <div className="flex-1 flex flex-col bg-gray-50">
+      <div className="bg-red-600 pt-12 pb-24 px-6 rounded-b-[40px] text-white shadow-md relative z-10 flex justify-between items-start">
+        <div>
+          <p className="text-red-100 text-sm font-medium">Konnichiwa,</p>
+          <h1 className="text-2xl font-bold mt-1 truncate">{user?.name}!</h1>
+          <div className="mt-2 inline-flex items-center gap-1.5 bg-red-700/50 px-3 py-1 rounded-full text-sm font-medium">
+            <Tag size={14} className="text-yellow-300" /> {user?.points || 0} Poin
+          </div>
+        </div>
+        <button onClick={onLogout} className="bg-red-700 p-2.5 rounded-full hover:bg-red-800 transition-colors shadow-sm"><LogOut size={20} /></button>
+      </div>
+
+      <div className="flex-1 px-6 -mt-16 z-20 relative space-y-4">
+        <button onClick={() => onNavigate('menu')} className="w-full bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex items-center justify-between hover:shadow-md transition-shadow active:scale-[0.98] text-left">
+          <div className="flex items-center gap-4">
+            <div className="w-16 h-16 bg-orange-100 text-orange-500 rounded-2xl flex items-center justify-center text-3xl">🍱</div>
+            <div>
+              <h2 className="text-lg font-bold text-gray-800">Pesan Makanan</h2>
+              <p className="text-sm text-gray-500 mt-1">Lihat menu dan pesan sekarang</p>
+            </div>
+          </div>
+          <ChevronLeft className="text-gray-300 rotate-180" />
+        </button>
+
+        <button onClick={() => onNavigate('status')} className="w-full bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex items-center justify-between hover:shadow-md transition-shadow active:scale-[0.98] text-left">
+          <div className="flex items-center gap-4">
+            <div className="w-16 h-16 bg-blue-100 text-blue-500 rounded-2xl flex items-center justify-center"><Clock size={32} /></div>
+            <div>
+              <h2 className="text-lg font-bold text-gray-800">Status Pesanan</h2>
+              <p className="text-sm text-gray-500 mt-1">Lacak status pesanan aktifmu</p>
+            </div>
+          </div>
+          <ChevronLeft className="text-gray-300 rotate-180" />
+        </button>
+      </div>
+    </div>
+  );
+}
+function MemberMenu({ menus, onBack, onSelectItem, cartCount, cartTotal, onCheckout }) {
+  return (
+    <div className="flex-1 flex flex-col bg-white">
+      <div className="flex items-center p-4 bg-white sticky top-0 z-20 shadow-sm border-b border-gray-50">
+        <button onClick={onBack} className="p-2 hover:bg-gray-100 rounded-full transition-colors"><ChevronLeft size={24} className="text-gray-700" /></button>
+        <h1 className="flex-1 text-center font-bold text-lg text-gray-800 pr-10">Menu Tabetai</h1>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-28">
+        {menus.map(item => (
+          <div key={item.dbId || item.id} className="flex gap-4 p-4 border border-gray-100 rounded-2xl shadow-sm bg-white">
+            <div className="w-24 h-24 bg-gray-50 rounded-xl flex items-center justify-center shrink-0 overflow-hidden">
+              <img src={item.image} alt={item.name} className="w-full h-full object-cover" onError={(e) => { e.target.src = 'https://placehold.co/100x100/eeeeee/999999?text=No+Image'; }} />
+            </div>
+            <div className="flex-1 flex flex-col">
+              <h3 className="font-bold text-gray-800">{item.name}</h3>
+              <p className="text-xs text-gray-500 mt-1 line-clamp-2">{item.desc}</p>
+              <div className="mt-auto flex items-center justify-between pt-3">
+                <span className="font-bold text-red-600">{formatRp(item.price)}</span>
+                <button onClick={() => onSelectItem(item)} className="bg-red-50 text-red-600 px-4 py-1.5 rounded-full font-semibold text-sm hover:bg-red-100 transition-colors">Tambah</button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {cartCount > 0 && (
+        <div className="absolute bottom-0 left-0 right-0 p-4 bg-white border-t border-gray-100 shadow-[0_-10px_40px_rgba(0,0,0,0.08)] z-30 animate-fade-in-up">
+          <div onClick={onCheckout} className="bg-red-600 text-white p-4 rounded-2xl flex items-center justify-between shadow-lg cursor-pointer active:scale-[0.98] transition-transform">
+            <div className="flex flex-col">
+              <span className="text-sm text-red-100 font-medium">{cartCount} Item di keranjang</span>
+              <span className="font-bold text-lg">{formatRp(cartTotal)}</span>
+            </div>
+            <div className="flex items-center gap-2 font-bold bg-red-700 py-2 px-4 rounded-xl"><ShoppingCart size={18} /> Checkout</div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function VariantModal({ item, onClose, onAdd }) {
+  const availableVariants = item.variants.filter(v => v.qty > 0);
+  const [selectedVariant, setSelectedVariant] = useState(availableVariants[0]?.name || '');
+  const [qty, setQty] = useState(1);
+  const [note, setNote] = useState('');
+
+  const handleAdd = () => {
+    if(!selectedVariant) return;
+    onAdd(item, selectedVariant, qty, note);
+  };
+
+  return (
+    <div className="absolute inset-0 bg-black/60 z-50 flex flex-col justify-end">
+      <div className="bg-white rounded-t-3xl p-6 w-full max-h-[90vh] flex flex-col shadow-2xl relative animate-slide-up">
+        <button onClick={onClose} className="absolute top-4 right-4 p-2 bg-gray-100 text-gray-600 rounded-full hover:bg-gray-200"><X size={20} /></button>
+        <div className="flex gap-4 items-center mb-6 border-b border-gray-100 pb-6 mt-2">
+           <div className="w-20 h-20 bg-gray-50 rounded-2xl flex items-center justify-center overflow-hidden shrink-0"><img src={item.image} alt={item.name} className="w-full h-full object-cover" /></div>
+            <div><h2 className="font-bold text-xl text-gray-800">{item.name}</h2><p className="text-red-600 font-bold text-lg mt-1">{formatRp(item.price)}</p></div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto mb-6">
+          <h3 className="font-bold text-gray-800 mb-3 text-sm">Pilih Varian <span className="text-red-500">*</span></h3>
+          <div className="space-y-2 mb-6">
+            {item.variants.map(variant => {
+              const isAvailable = variant.qty > 0;
+              return (
+                <label key={variant.name} className={`flex items-center justify-between p-4 border rounded-xl transition-all ${!isAvailable ? 'opacity-50 bg-gray-50 cursor-not-allowed' : 'cursor-pointer'} ${selectedVariant === variant.name ? 'border-red-500 bg-red-50/50' : 'border-gray-200'}`}>
+                  <span className={`font-medium ${selectedVariant === variant.name ? 'text-red-700' : 'text-gray-700'}`}>{variant.name} {!isAvailable && '(Habis)'}</span>
+                  {isAvailable && (
+                    <>
+                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${selectedVariant === variant.name ? 'border-red-500' : 'border-gray-300'}`}>{selectedVariant === variant.name && <div className="w-2.5 h-2.5 bg-red-500 rounded-full" />}</div>
+                      <input type="radio" name="variant" value={variant.name} disabled={!isAvailable} checked={selectedVariant === variant.name} onChange={() => setSelectedVariant(variant.name)} className="hidden" />
+                    </>
+                  )}
+                </label>
+              );
+            })}
+          </div>
+          <h3 className="font-bold text-gray-800 mb-3 text-sm">Catatan (Opsional)</h3>
+          <textarea placeholder="Contoh: Jangan terlalu pedas, kuah dipisah..." value={note} onChange={(e) => setNote(e.target.value)} className="w-full p-4 border border-gray-200 rounded-xl focus:border-red-500 focus:ring-2 focus:ring-red-200 outline-none transition-all text-sm resize-none" rows="2" />
+        </div>
+
+        {availableVariants.length > 0 ? (
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-4 bg-gray-100 p-2 rounded-xl">
+              <button onClick={() => setQty(Math.max(1, qty - 1))} className="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm text-gray-600"><Minus size={18} /></button>
+              <span className="font-bold text-lg w-4 text-center">{qty}</span>
+              <button onClick={() => setQty(qty + 1)} className="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-sm text-red-600"><Plus size={18} /></button>
+            </div>
+            <button onClick={handleAdd} className="flex-1 bg-red-600 text-white font-bold py-4 rounded-xl shadow-md hover:bg-red-700 active:scale-95 transition-transform">Tambah - {formatRp(item.price * qty)}</button>
+          </div>
+        ) : (
+          <button disabled className="w-full bg-gray-300 text-gray-500 font-bold py-4 rounded-xl shadow-sm">Stok Habis</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MemberCheckout({ cart, onBack, updateQty, subtotal, onPay, promos }) {
+  const [promoCodeInput, setPromoCodeInput] = useState('');
+  const [appliedPromo, setAppliedPromo] = useState(null);
+  const [promoError, setPromoError] = useState('');
+
+  if (cart.length === 0) {
+    return (
+      <div className="flex-1 flex flex-col bg-gray-50">
+        <div className="p-4 bg-white flex items-center"><button onClick={onBack} className="p-2"><ChevronLeft size={24} /></button><h1 className="flex-1 text-center font-bold pr-10 text-lg">Keranjang</h1></div>
+        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center text-gray-500"><Utensils size={64} className="mb-4 text-gray-300" /><p>Keranjangmu masih kosong.</p><button onClick={onBack} className="mt-4 text-red-600 font-bold p-2">Pilih Menu</button></div>
+      </div>
+    );
+  }
+
+  const handleApplyPromo = () => {
+    setPromoError('');
+    if (!promoCodeInput.trim()) return;
+    const promo = promos.find(p => p.code.toLowerCase() === promoCodeInput.toLowerCase() && p.isActive !== false);
+    if (promo) {
+      setAppliedPromo(promo);
+    } else {
+      setAppliedPromo(null);
+      setPromoError('Kode promo tidak valid atau kadaluarsa.');
+    }
+  };
+
+  const handleRemovePromo = () => {
+    setAppliedPromo(null);
+    setPromoCodeInput('');
+    setPromoError('');
+  };
+
+  let discountAmount = 0;
+  if (appliedPromo) {
+    if (appliedPromo.type === 'percent') discountAmount = (subtotal * appliedPromo.value) / 100;
+    else discountAmount = appliedPromo.value;
+    if (discountAmount > subtotal) discountAmount = subtotal;
+  }
+  const finalTotal = subtotal - discountAmount;
+
+  return (
+    <div className="flex-1 flex flex-col bg-gray-50">
+      <div className="flex items-center p-4 bg-white sticky top-0 z-20 shadow-sm"><button onClick={onBack} className="p-2 hover:bg-gray-100 rounded-full"><ChevronLeft size={24} className="text-gray-700" /></button><h1 className="flex-1 text-center font-bold text-lg text-gray-800 pr-10">Konfirmasi Pesanan</h1></div>
+      <div className="flex-1 overflow-y-auto p-4 pb-32">
+        <div className="bg-yellow-50 text-yellow-800 p-4 rounded-xl border border-yellow-200 mb-6 text-sm font-medium flex gap-3 items-start shadow-sm"><span className="text-xl">⚠️</span><p>Pre-Orders are accepted until 21.00 WIB. please make payment before checkout</p></div>
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-6">
+          <div className="p-4 border-b border-gray-100 bg-gray-50/50"><h2 className="font-bold text-gray-800 text-sm">Daftar Pesanan</h2></div>
+          <div className="divide-y divide-gray-100">
+            {cart.map(item => (
+              <div key={item.cartId} className="p-4 flex gap-4">
+                <div className="w-16 h-16 bg-gray-50 rounded-xl overflow-hidden shrink-0"><img src={item.image} alt={item.name} className="w-full h-full object-cover" /></div>
+                <div className="flex-1">
+                  <h3 className="font-bold text-gray-800 text-sm">{item.name}</h3>
+                  <p className="text-xs text-gray-500 mt-0.5">Varian: {item.variant}</p>
+                  {item.note && <p className="text-xs text-gray-400 mt-0.5 italic">Catatan: {item.note}</p>}
+                  <p className="font-bold text-red-600 text-sm mt-1">{formatRp(item.price)}</p>
+                </div>
+                <div className="flex flex-col items-end justify-between">
+                  <div className="flex items-center gap-3 bg-gray-50 p-1 rounded-lg border border-gray-100">
+                    <button onClick={() => updateQty(item.cartId, -1)} className="w-7 h-7 bg-white rounded flex items-center justify-center text-gray-600 shadow-sm"><Minus size={14} /></button>
+                    <span className="font-semibold text-sm w-4 text-center">{item.quantity}</span>
+                    <button onClick={() => updateQty(item.cartId, 1)} className="w-7 h-7 bg-white rounded flex items-center justify-center text-red-600 shadow-sm"><Plus size={14} /></button>
+                  </div>
+                  <span className="text-xs font-bold text-gray-800 mt-2">{formatRp(item.price * item.quantity)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        
+        {/* Promo Section */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 mb-6">
+          <h2 className="font-bold text-gray-800 text-sm mb-3">Punya Kode Promo?</h2>
+          {!appliedPromo ? (
+            <div>
+              <div className="flex gap-2">
+                <input type="text" value={promoCodeInput} onChange={e => setPromoCodeInput(e.target.value)} placeholder="Masukkan kode voucher" className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 focus:border-red-500 focus:ring-1 focus:ring-red-500 outline-none text-sm uppercase" />
+                <button onClick={handleApplyPromo} className="bg-gray-900 text-white font-bold px-5 py-2.5 rounded-xl text-sm">Pakai</button>
+              </div>
+              {promoError && <p className="text-red-500 text-xs mt-2">{promoError}</p>}
+            </div>
+          ) : (
+            <div className="bg-green-50 border border-green-200 p-3 rounded-xl flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <Tag size={16} className="text-green-600" />
+                <div><p className="text-sm font-bold text-green-800">{appliedPromo.code}</p><p className="text-xs text-green-600">Diskon diaplikasikan</p></div>
+              </div>
+              <button onClick={handleRemovePromo} className="text-gray-400 hover:text-red-500 p-1"><X size={16} /></button>
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
+          <h2 className="font-bold text-gray-800 text-sm mb-3">Ringkasan Pembayaran</h2>
+          <div className="space-y-2 text-sm">
+            <div className="flex justify-between text-gray-600"><span>Subtotal</span><span>{formatRp(subtotal)}</span></div>
+            {discountAmount > 0 && <div className="flex justify-between text-green-600 font-medium"><span>Diskon Promo</span><span>-{formatRp(discountAmount)}</span></div>}
+          </div>
+          <div className="border-t border-dashed border-gray-200 mt-3 pt-3 flex justify-between items-center">
+            <span className="font-bold text-gray-800">Total</span><span className="font-black text-red-600 text-lg">{formatRp(finalTotal)}</span>
+          </div>
+          <div className="mt-2 text-xs text-center text-gray-400 bg-gray-50 py-1.5 rounded-lg border border-gray-100">
+            Dapatkan <strong>{Math.floor(finalTotal * 0.1)} Poin</strong> dari pesanan ini
+          </div>
+        </div>
+      </div>
+      <div className="absolute bottom-0 left-0 right-0 p-4 bg-white border-t border-gray-100 shadow-[0_-10px_40px_rgba(0,0,0,0.08)] z-30">
+        <button onClick={() => onPay(finalTotal, appliedPromo ? { code: appliedPromo.code, value: discountAmount } : null)} className="w-full bg-red-600 text-white font-bold py-4 rounded-xl shadow-md hover:bg-red-700 active:scale-95 transition-transform flex items-center justify-center gap-2 text-lg">Pay Now <ChevronLeft className="rotate-180" size={20} /></button>
+      </div>
+    </div>
+  );
+}
+
+function MemberPayment({ onCheckStatus, order, userPhone }) {
+  if(!order) return null;
+  const handleSaveImage = () => { window.open(qrisImageUrl, '_blank'); };
+  
+  const handleConfirmWA = () => {
+    const text = `Halo Admin Tabetai, saya ${order.customer} sudah melakukan pembayaran via QRIS untuk Order ID: ${order.id}. Mohon dicek ya!`;
+    window.open(`https://wa.me/${ADMIN_WA_NUMBER}?text=${text}`, '_blank');
+  };
+
+  return (
+    <div className="flex-1 flex flex-col bg-white">
+       <div className="p-4 bg-white flex items-center border-b border-gray-100"><h1 className="flex-1 text-center font-bold text-lg text-gray-800">Pembayaran</h1></div>
+      <div className="flex-1 overflow-y-auto p-6 flex flex-col items-center">
+        <div className="bg-blue-50 text-blue-700 px-4 py-2 rounded-lg text-sm font-medium mb-6 flex items-center gap-2 w-full justify-center"><Clock size={16} /> Selesaikan dalam 15:00</div>
+        <p className="text-gray-500 text-sm mb-1">Total Tagihan</p><p className="text-3xl font-black text-gray-800 mb-8">{formatRp(order.total)}</p>
+        <div className="bg-white p-6 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-gray-100 mb-6 w-full max-w-[280px] aspect-square flex items-center justify-center relative">
+          <img src={qrisImageUrl} alt="QRIS Code" className="w-full h-full object-contain p-2" />
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-red-600 text-white px-4 py-1 rounded-full text-xs font-bold tracking-wider">QRIS TABETAI</div>
+        </div>
+        <div className="flex gap-3 w-full max-w-[280px]">
+          <button onClick={handleSaveImage} className="flex-1 flex flex-col items-center justify-center gap-1 text-red-600 font-semibold border-2 border-red-100 bg-red-50 p-3 rounded-xl hover:bg-red-100 transition-colors"><Download size={20} /> <span className="text-xs">Save QRIS</span></button>
+          <button onClick={() => window.open(generateInvoiceWAUrl(order, userPhone), '_blank')} className="flex-1 flex flex-col items-center justify-center gap-1 text-blue-600 font-semibold border-2 border-blue-100 bg-blue-50 p-3 rounded-xl hover:bg-blue-100 transition-colors"><ScrollText size={20} /> <span className="text-xs">Kirim Invoice</span></button>
+        </div>
+        
+        <div className="w-full mt-10 space-y-3">
+          <button onClick={handleConfirmWA} className="w-full bg-green-600 text-white font-bold py-4 rounded-xl shadow-md hover:bg-green-700 active:scale-95 transition-transform flex items-center justify-center gap-2">
+            <MessageCircle size={20} /> Konfirmasi Pesanan WA
+          </button>
+          <button onClick={onCheckStatus} className="w-full bg-gray-900 text-white font-bold py-4 rounded-xl shadow-md hover:bg-gray-800 active:scale-95 transition-transform">
+            Cek Status Pembayaran
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MemberStatus({ orders, onBack, userPhone }) {
+  return (
+    <div className="flex-1 flex flex-col bg-gray-50 pb-24">
+      <div className="flex items-center p-4 bg-white sticky top-0 z-20 shadow-sm border-b border-gray-100"><button onClick={onBack} className="p-2 hover:bg-gray-100 rounded-full transition-colors"><ChevronLeft size={24} className="text-gray-700" /></button><h1 className="flex-1 text-center font-bold text-lg text-gray-800 pr-10">Status Pesanan</h1></div>
+      <div className="flex-1 overflow-y-auto p-4">
+        {orders.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full text-gray-400 mt-20"><Store size={64} className="mb-4 opacity-50" /><p>Belum ada riwayat pesanan.</p></div>
+        ) : (
+          <div className="space-y-4">
+            {orders.map((order, index) => (
+              <div key={order.dbId || order.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 relative overflow-hidden">
+                <div className={`absolute top-0 left-0 w-1.5 h-full ${order.status === 'Selesai' ? 'bg-green-500' : 'bg-orange-500'}`} />
+                <div className="flex justify-between items-start mb-3">
+                  <div><p className="text-xs text-gray-500 mb-0.5">{order.date}</p><p className="font-bold text-gray-800 text-sm">Order ID: {order.id}</p></div>
+                  <span className={`text-xs font-bold px-3 py-1 rounded-full ${order.status === 'Selesai' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>{order.status}</span>
+                </div>
+                <div className="border-t border-b border-gray-50 py-3 my-3">
+                  <p className="text-sm text-gray-600 mb-2">{order.items.length} Menu dipesan:</p>
+                  <div className="space-y-1.5">
+                    {order.items.map((item, i) => (
+                      <div key={i} className="text-sm">
+                        <span className="font-semibold text-gray-800">{item.quantity}x {item.name}</span>
+                        {item.note && <p className="text-xs text-gray-500 italic ml-4">"{item.note}"</p>}
+                      </div>
+                    ))}
+                  </div>
+                  {order.discount && order.discount.value > 0 && <p className="text-xs text-green-600 font-medium mt-2">- Diskon: {formatRp(order.discount.value)}</p>}
+                  {order.earnedPoints > 0 && <p className="text-xs text-yellow-600 font-medium mt-1">+ Mendapat {order.earnedPoints} Poin</p>}
+                </div>
+                <div className="flex justify-between items-center mb-3">
+                  <span className="text-sm text-gray-500">Total Belanja</span><span className="font-bold text-gray-800">{formatRp(order.total)}</span>
+                </div>
+                <button onClick={() => window.open(generateInvoiceWAUrl(order, userPhone), '_blank')} className="w-full bg-blue-50 text-blue-600 text-sm font-semibold py-2.5 rounded-xl border border-blue-100 hover:bg-blue-100 transition-colors flex items-center justify-center gap-2">
+                  <Download size={16} /> Unduh Invoice WA
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-gray-100 shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-30 max-w-md mx-auto">
+        <button onClick={onBack} className="w-full bg-gray-100 text-gray-800 font-bold py-3.5 rounded-xl hover:bg-gray-200 transition-colors">Kembali ke Beranda</button>
+      </div>
+    </div>
+  );
+}
+
+function AdminDashboard({ onNavigate, onLogout, stats }) {
+  return (
+    <div className="flex-1 flex flex-col bg-slate-100">
+      <div className="bg-slate-900 pt-12 pb-20 px-6 rounded-b-[40px] text-white shadow-md relative z-10">
+        <div className="flex justify-between items-center">
+          <div><p className="text-slate-400 text-sm font-medium">Selamat Datang,</p><h1 className="text-2xl font-bold mt-1">gillhardjo</h1></div>
+          <button onClick={onLogout} className="bg-slate-800 p-3 rounded-full hover:bg-slate-700 transition-colors"><LogOut size={20} /></button>
+        </div>
+      </div>
+      <div className="flex-1 px-6 -mt-12 z-20 relative space-y-4 pb-10">
+        <button onClick={() => onNavigate('menus')} className="w-full bg-white rounded-2xl p-5 shadow-sm border border-slate-200 flex items-center justify-between hover:shadow-md transition-all active:scale-[0.98] text-left">
+          <div className="flex items-center gap-4"><div className="w-14 h-14 bg-orange-100 text-orange-600 rounded-xl flex items-center justify-center"><UtensilsCrossed size={28} /></div><div><h2 className="text-lg font-bold text-slate-800">Manajemen Menu</h2><p className="text-sm text-slate-500 mt-0.5">{stats.menus} Menu aktif</p></div></div>
+        </button>
+        <button onClick={() => onNavigate('orders')} className="w-full bg-white rounded-2xl p-5 shadow-sm border border-slate-200 flex items-center justify-between hover:shadow-md transition-all active:scale-[0.98] text-left">
+          <div className="flex items-center gap-4"><div className="w-14 h-14 bg-blue-100 text-blue-600 rounded-xl flex items-center justify-center"><ScrollText size={28} /></div><div><h2 className="text-lg font-bold text-slate-800">Pesanan Masuk</h2><p className="text-sm text-slate-500 mt-0.5">{stats.orders} Pesanan perlu diproses</p></div></div>
+        </button>
+        <button onClick={() => onNavigate('promos')} className="w-full bg-white rounded-2xl p-5 shadow-sm border border-slate-200 flex items-center justify-between hover:shadow-md transition-all active:scale-[0.98] text-left">
+          <div className="flex items-center gap-4"><div className="w-14 h-14 bg-green-100 text-green-600 rounded-xl flex items-center justify-center"><Tag size={28} /></div><div><h2 className="text-lg font-bold text-slate-800">Manajemen Promo</h2><p className="text-sm text-slate-500 mt-0.5">{stats.promos} Promo tersedia</p></div></div>
+        </button>
+        <button onClick={() => onNavigate('members')} className="w-full bg-white rounded-2xl p-5 shadow-sm border border-slate-200 flex items-center justify-between hover:shadow-md transition-all active:scale-[0.98] text-left">
+          <div className="flex items-center gap-4"><div className="w-14 h-14 bg-purple-100 text-purple-600 rounded-xl flex items-center justify-center"><Users size={28} /></div><div><h2 className="text-lg font-bold text-slate-800">Daftar Member</h2><p className="text-sm text-slate-500 mt-0.5">{stats.members} Member terdaftar</p></div></div>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AdminMenuManager({ menus }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [currentMenu, setCurrentMenu] = useState(null);
+
+  const handleAddNew = () => {
+    setCurrentMenu({ id: Date.now(), orderPriority: 99, name: '', desc: '', price: '', image: '', isActive: true, variants: [{ name: '', qty: 0 }] });
+    setIsEditing(true);
+  };
+
+  const handleSaveMenu = async (savedMenu) => {
+    try {
+      if (savedMenu.dbId) await updateDoc(doc(db, 'menus', savedMenu.dbId), savedMenu);
+      else await addDoc(collection(db, 'menus'), savedMenu);
+      setIsEditing(false);
+    } catch (e) { alert("Error menyimpan menu!"); console.error(e); }
+  };
+
+  const handleDeleteMenu = async (id) => {
+    if(window.confirm('Hapus menu ini?')) { 
+      const target = menus.find(m => (m.dbId || m.id) === id);
+      if (target && target.dbId) await deleteDoc(doc(db, 'menus', target.dbId));
+    }
+  };
+
+  const handleToggleVisibility = async (id) => {
+    const target = menus.find(m => (m.dbId || m.id) === id);
+    if (target && target.dbId) await updateDoc(doc(db, 'menus', target.dbId), { isActive: target.isActive === false ? true : false });
+  };
+
+  if (isEditing) return <AdminMenuForm menu={currentMenu} onSave={handleSaveMenu} onCancel={() => setIsEditing(false)} />;
+
+  const sortedMenus = [...menus].sort((a,b) => (a.orderPriority || 99) - (b.orderPriority || 99));
+
+  return (
+    <div className="flex-1 flex flex-col relative pb-24 overflow-y-auto">
+      <div className="p-4 space-y-4">
+        {sortedMenus.map(menu => (
+          <div key={menu.dbId || menu.id} className={`bg-white p-4 rounded-2xl shadow-sm border ${menu.isActive !== false ? 'border-slate-200' : 'border-dashed border-slate-300 opacity-75'} flex flex-col`}>
+            <div className="flex gap-4">
+              <div className="flex flex-col items-center justify-center w-8 bg-slate-50 rounded-lg border border-slate-100 text-slate-400">
+                <GripVertical size={16} className="mb-1 opacity-50" />
+                <span className="text-xs font-bold">{menu.orderPriority || '-'}</span>
+              </div>
+              <div className={`w-16 h-16 bg-slate-100 rounded-xl flex items-center justify-center shrink-0 overflow-hidden ${menu.isActive === false ? 'grayscale' : ''}`}>
+                <img src={menu.image} alt={menu.name} className="w-full h-full object-cover" onError={(e) => { e.target.src = 'https://placehold.co/100x100/eeeeee/999999?text=No+Image'; }} />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-bold text-slate-800 flex items-center gap-2 text-sm">
+                  {menu.name} {menu.isActive === false && <span className="bg-slate-200 text-slate-500 text-[10px] px-1.5 py-0.5 rounded-md uppercase font-bold tracking-wider">Hidden</span>}
+                </h3>
+                <p className="text-xs text-slate-500 font-bold mt-1">{formatRp(menu.price)}</p>
+              </div>
+              <div className="flex flex-col gap-2">
+                <button onClick={() => handleToggleVisibility(menu.dbId || menu.id)} className={`p-1.5 rounded-lg flex items-center justify-center ${menu.isActive !== false ? 'bg-green-50 text-green-600' : 'bg-slate-100 text-slate-500'}`}>
+                  {menu.isActive !== false ? <Eye size={16} /> : <EyeOff size={16} />}
+                </button>
+                <button onClick={() => { setCurrentMenu(menu); setIsEditing(true); }} className="p-1.5 flex items-center justify-center bg-blue-50 text-blue-600 rounded-lg"><Edit2 size={16} /></button>
+                <button onClick={() => handleDeleteMenu(menu.dbId || menu.id)} className="p-1.5 flex items-center justify-center bg-red-50 text-red-600 rounded-lg"><Trash2 size={16} /></button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <button onClick={handleAddNew} className="absolute bottom-6 right-6 bg-slate-900 text-white p-4 rounded-full shadow-lg hover:bg-slate-800 transition-transform active:scale-95 flex items-center justify-center"><Plus size={28} /></button>
+    </div>
+  );
+}
+
+function AdminMenuForm({ menu, onSave, onCancel }) {
+  const [formData, setFormData] = useState(menu);
+  const handleVariantChange = (index, field, value) => { const newVariants = [...formData.variants]; newVariants[index][field] = value; setFormData({ ...formData, variants: newVariants }); };
+  const addVariant = () => { setFormData({ ...formData, variants: [...formData.variants, { name: '', qty: 0 }] }); };
+  const removeVariant = (index) => { setFormData({ ...formData, variants: formData.variants.filter((_, i) => i !== index) }); };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (formData.variants.length === 0) return alert("Minimal masukkan 1 varian!");
+    if (!formData.image) return alert("Harap masukkan URL Gambar Menu!");
+    onSave({ ...formData, price: Number(formData.price), orderPriority: Number(formData.orderPriority) || 99 });
+  };
+
+  return (
+    <div className="flex-1 bg-white overflow-y-auto relative">
+      <form onSubmit={handleSubmit} className="p-6 space-y-5 pb-32">
+        <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-200">
+          <div><label className="block text-sm font-bold text-slate-700">Tampilkan ke Pelanggan</label><p className="text-xs text-slate-500">Menu ini akan terlihat di aplikasi</p></div>
+          <button type="button" onClick={() => setFormData({...formData, isActive: formData.isActive === false ? true : false})} className={`w-12 h-6 rounded-full relative transition-colors ${formData.isActive !== false ? 'bg-slate-900' : 'bg-slate-300'}`}>
+            <div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${formData.isActive !== false ? 'left-7' : 'left-1'}`} />
+          </button>
+        </div>
+        <div className="flex gap-4">
+          <div className="w-24"><label className="block text-sm font-bold text-slate-700 mb-1">No. Urut</label><input type="number" required value={formData.orderPriority} onChange={e => setFormData({...formData, orderPriority: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-slate-900 text-center" /></div>
+          <div className="flex-1"><label className="block text-sm font-bold text-slate-700 mb-1">Nama Menu</label><input required type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-slate-900" /></div>
+        </div>
+        <div>
+          <label className="block text-sm font-bold text-slate-700 mb-1">Gambar Menu (URL)</label>
+          <div className="flex gap-4 items-center">
+            <div className="w-16 h-16 bg-slate-100 rounded-xl overflow-hidden shrink-0 border border-slate-200 flex items-center justify-center">
+               {formData.image ? <img src={formData.image} alt="Preview" className="w-full h-full object-cover" onError={(e) => { e.target.src = 'https://placehold.co/100x100/eeeeee/999999?text=No+Image'; }} /> : <span className="text-slate-400 text-xs">No Img</span>}
+            </div>
+            <input required type="url" placeholder="https://..." value={formData.image} onChange={e => setFormData({...formData, image: e.target.value})} className="flex-1 px-4 py-3 rounded-xl border border-slate-200 focus:border-slate-900 text-sm" />
+          </div>
+        </div>
+        <div><label className="block text-sm font-bold text-slate-700 mb-1">Deskripsi Singkat</label><textarea required value={formData.desc} onChange={e => setFormData({...formData, desc: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-slate-900 text-sm" rows={2} /></div>
+        <div><label className="block text-sm font-bold text-slate-700 mb-1">Harga Dasar (Rp)</label><input required type="number" value={formData.price} onChange={e => setFormData({...formData, price: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-slate-900" /></div>
+        <div className="pt-4 border-t border-slate-200">
+          <div className="flex justify-between items-center mb-3"><label className="block text-sm font-bold text-slate-700">Varian & Qty</label><button type="button" onClick={addVariant} className="text-xs bg-slate-900 text-white px-3 py-1.5 rounded-lg flex items-center gap-1"><Plus size={14}/> Tambah</button></div>
+          <div className="space-y-3">
+            {formData.variants.map((v, i) => (
+              <div key={i} className="flex gap-2 items-center bg-slate-50 p-2 rounded-xl border border-slate-100">
+                <input required type="text" placeholder="Nama Varian" value={v.name} onChange={e => handleVariantChange(i, 'name', e.target.value)} className="flex-1 px-3 py-2 rounded-lg border border-slate-200 text-sm"/>
+                <div className="flex flex-col"><span className="text-[10px] text-slate-500 font-bold px-1">QTY</span><input required type="number" min="0" value={v.qty} onChange={e => handleVariantChange(i, 'qty', Number(e.target.value))} className="w-16 px-2 py-2 rounded-lg border border-slate-200 text-sm text-center"/></div>
+                {formData.variants.length > 1 && (<button type="button" onClick={() => removeVariant(i)} className="p-2 text-red-500 bg-red-50 rounded-lg"><X size={16} /></button>)}
+              </div>
+            ))}
+          </div>
+        </div>
+      </form>
+      <div className="absolute bottom-0 left-0 right-0 p-4 bg-white border-t border-slate-200 flex gap-3 shadow-[0_-10px_20px_rgba(0,0,0,0.05)]">
+        <button type="button" onClick={onCancel} className="flex-1 bg-slate-100 text-slate-700 font-bold py-3.5 rounded-xl border border-slate-200">Batal</button>
+        <button type="button" onClick={handleSubmit} className="flex-1 bg-slate-900 text-white font-bold py-3.5 rounded-xl shadow-md flex items-center justify-center gap-2"><Save size={18}/> Simpan</button>
+      </div>
+    </div>
+  );
+}
+
+function AdminOrderManager({ orders }) {
+  const [filterName, setFilterName] = useState('');
+  const [filterStatus, setFilterStatus] = useState('Semua');
+  const [filterDate, setFilterDate] = useState('');
+
+  const STATUS_OPTIONS = ['Menunggu Pembayaran', 'Diproses', 'Selesai', 'Dibatalkan'];
+  
+  const handleStatusChange = async (orderId, newStatus) => { 
+    const target = orders.find(o => (o.dbId || o.id) === orderId);
+    if (target && target.dbId) {
+      try { await updateDoc(doc(db, 'orders', target.dbId), { status: newStatus }); }
+      catch(e) { console.error(e); }
+    }
+  };
+
+  const filteredOrders = useMemo(() => {
+    return orders.filter(o => {
+      const query = filterName.toLowerCase();
+      const matchSearch = o.customer.toLowerCase().includes(query) || o.id.toLowerCase().includes(query);
+      const matchStatus = filterStatus === 'Semua' || o.status === filterStatus;
+      const matchDate = filterDate === '' || o.date.includes(filterDate);
+      return matchSearch && matchStatus && matchDate;
+    });
+  }, [orders, filterName, filterStatus, filterDate]);
+
+  return (
+    <div className="flex-1 overflow-y-auto flex flex-col">
+      <div className="bg-white p-4 border-b border-slate-200 shadow-sm space-y-3 z-10 sticky top-0">
+        <div className="flex items-center gap-2 text-slate-700 font-bold text-sm mb-1"><Filter size={16} /> Filter Pesanan</div>
+        <div className="flex gap-2">
+           <div className="relative flex-1">
+             <Search size={14} className="absolute left-3 top-2.5 text-slate-400" />
+             <input type="text" placeholder="Nama / Order ID" value={filterName} onChange={e=>setFilterName(e.target.value)} className="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:border-slate-400" />
+           </div>
+           <input type="date" value={filterDate} onChange={e=>setFilterDate(e.target.value)} className="w-32 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:border-slate-400" />
+        </div>
+        <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:border-slate-400">
+           <option value="Semua">Semua Status</option>
+           {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </div>
+
+      <div className="p-4 space-y-4">
+        {filteredOrders.length === 0 ? (
+          <p className="text-center text-slate-500 mt-10">Tidak ada pesanan yang sesuai filter.</p>
+        ) : (
+          filteredOrders.map(order => (
+            <div key={order.dbId || order.id} className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
+              <div className="flex justify-between items-start mb-4 border-b border-slate-100 pb-3">
+                <div><p className="font-black text-slate-800">{order.id}</p><p className="text-xs text-slate-500">{order.date}</p></div>
+                <div className="text-right"><p className="text-sm font-bold text-slate-700">{order.customer}</p></div>
+              </div>
+              <div className="space-y-2 mb-4">
+                {order.items.map((item, i) => (
+                  <div key={i} className="flex items-start gap-2 text-sm">
+                    <span className="font-bold bg-slate-100 px-2 rounded text-slate-700">{item.quantity}x</span>
+                    <div>
+                      <p className="font-medium text-slate-800">{item.name}</p>
+                      <p className="text-xs text-slate-500">Varian: {item.variant}</p>
+                      {item.note && <p className="text-xs text-slate-500 italic mt-0.5">"{item.note}"</p>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-slate-100 mb-4">
+                <span className="text-sm font-bold text-slate-600">Total Pembayaran</span><span className="font-black text-slate-900">{formatRp(order.total)}</span>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">Ubah Status Pesanan</label>
+                <select 
+                  value={order.status} onChange={(e) => handleStatusChange(order.dbId || order.id, e.target.value)}
+                  className={`w-full text-sm font-bold p-3 rounded-xl border outline-none appearance-none ${
+                    order.status === 'Selesai' ? 'bg-green-50 text-green-700 border-green-200' : 
+                    order.status === 'Diproses' ? 'bg-blue-50 text-blue-700 border-blue-200' : 
+                    order.status === 'Dibatalkan' ? 'bg-red-50 text-red-700 border-red-200' : 
+                    'bg-orange-50 text-orange-700 border-orange-200'
+                  }`}
+                >
+                  {STATUS_OPTIONS.map(status => (<option key={status} value={status}>{status}</option>))}
+                </select>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AdminMemberManager({ members }) {
+  const [editingMember, setEditingMember] = useState(null);
+  
+  const handleSaveMember = async (e) => { 
+    e.preventDefault(); 
+    if (editingMember.dbId) {
+      try { await updateDoc(doc(db, 'members', editingMember.dbId), editingMember); } 
+      catch(e) { console.error(e); }
+    }
+    setEditingMember(null); 
+  };
+
+  const handleDeleteMember = async (id) => {
+    if(window.confirm('Hapus member ini dari database?')) { 
+      const target = members.find(m => (m.dbId || m.id) === id);
+      if (target && target.dbId) await deleteDoc(doc(db, 'members', target.dbId));
+    }
+  };
+
+  return (
+    <div className="flex-1 relative overflow-hidden flex flex-col">
+      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        {members.map(member => (
+          <div key={member.dbId || member.id} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex justify-between items-center">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-purple-100 text-purple-600 rounded-full flex items-center justify-center font-bold text-lg">{member.name.charAt(0).toUpperCase()}</div>
+              <div>
+                <h3 className="font-bold text-slate-800">{member.name}</h3>
+                <p className="text-sm text-slate-500">{member.phone}</p>
+                <p className="text-xs font-bold text-yellow-600 mt-0.5">{member.points || 0} Poin</p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setEditingMember(member)} className="p-2.5 bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-xl transition-colors"><Edit2 size={18} /></button>
+              <button onClick={() => handleDeleteMember(member.dbId || member.id)} className="p-2.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-xl transition-colors"><Trash2 size={18} /></button>
+            </div>
+          </div>
+        ))}
+      </div>
+      {editingMember && (
+        <div className="absolute inset-0 bg-slate-900/60 z-50 flex flex-col justify-end">
+          <div className="bg-white rounded-t-3xl p-6 w-full flex flex-col shadow-2xl animate-slide-up">
+            <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4"><h2 className="font-bold text-xl text-slate-800">Edit Member</h2><button onClick={() => setEditingMember(null)} className="p-2 bg-slate-100 text-slate-600 rounded-full"><X size={20} /></button></div>
+            <form onSubmit={handleSaveMember} className="space-y-4">
+              <div><label className="block text-sm font-bold text-slate-700 mb-1">Nama / Username</label><input required type="text" value={editingMember.name} onChange={e => setEditingMember({...editingMember, name: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-slate-900" /></div>
+              <div><label className="block text-sm font-bold text-slate-700 mb-1">No. WhatsApp</label><input required type="tel" value={editingMember.phone} onChange={e => setEditingMember({...editingMember, phone: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-slate-900" /></div>
+              <div><label className="block text-sm font-bold text-slate-700 mb-1">Total Poin</label><input required type="number" value={editingMember.points || 0} onChange={e => setEditingMember({...editingMember, points: Number(e.target.value)})} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-slate-900" /></div>
+              <button type="submit" className="w-full bg-slate-900 text-white font-bold py-4 rounded-xl shadow-md mt-6 flex items-center justify-center gap-2"><Save size={20}/> Simpan Perubahan</button>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AdminPromoManager({ promos }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [currentPromo, setCurrentPromo] = useState(null);
+
+  const handleAddNew = () => {
+    setCurrentPromo({ id: Date.now(), code: '', type: 'percent', value: 0, isActive: true });
+    setIsEditing(true);
+  };
+
+  const handleSavePromo = async (e) => {
+    e.preventDefault();
+    if (currentPromo.dbId) {
+      await updateDoc(doc(db, 'promos', currentPromo.dbId), currentPromo);
+    } else { 
+      await addDoc(collection(db, 'promos'), currentPromo); 
+    }
+    setIsEditing(false);
+  };
+
+  const handleDeletePromo = async (id) => {
+    if(window.confirm('Hapus promo ini?')) { 
+      const target = promos.find(p => (p.dbId || p.id) === id);
+      if (target && target.dbId) await deleteDoc(doc(db, 'promos', target.dbId));
+    }
+  };
+
+  if (isEditing) return (
+    <div className="flex-1 bg-white overflow-y-auto relative">
+      <form onSubmit={handleSavePromo} className="p-6 space-y-5 pb-32">
+        <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-200">
+          <div><label className="block text-sm font-bold text-slate-700">Status Promo</label><p className="text-xs text-slate-500">Aktif / Non-Aktif</p></div>
+          <button type="button" onClick={() => setCurrentPromo({...currentPromo, isActive: !currentPromo.isActive})} className={`w-12 h-6 rounded-full relative transition-colors ${currentPromo.isActive ? 'bg-green-500' : 'bg-slate-300'}`}>
+            <div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-all ${currentPromo.isActive ? 'left-7' : 'left-1'}`} />
+          </button>
+        </div>
+        <div><label className="block text-sm font-bold text-slate-700 mb-1">Kode Promo</label><input required type="text" value={currentPromo.code} onChange={e => setCurrentPromo({...currentPromo, code: e.target.value.toUpperCase()})} placeholder="Cth: DISKON50" className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-slate-900 uppercase" /></div>
+        <div>
+          <label className="block text-sm font-bold text-slate-700 mb-1">Jenis Diskon</label>
+          <select value={currentPromo.type} onChange={e => setCurrentPromo({...currentPromo, type: e.target.value})} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-slate-900 outline-none bg-white">
+            <option value="percent">Persentase (%)</option>
+            <option value="nominal">Nominal / Potongan Harga (Rp)</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm font-bold text-slate-700 mb-1">Nilai Diskon</label>
+          <input required type="number" min="1" value={currentPromo.value} onChange={e => setCurrentPromo({...currentPromo, value: Number(e.target.value)})} className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-slate-900" />
+          <p className="text-xs text-slate-500 mt-1">Jika persentase, isi 1-100. Jika nominal, isi langsung jumlahnya (cth: 15000)</p>
+        </div>
+      </form>
+      <div className="absolute bottom-0 left-0 right-0 p-4 bg-white border-t border-slate-200 flex gap-3 shadow-[0_-10px_20px_rgba(0,0,0,0.05)]">
+        <button type="button" onClick={() => setIsEditing(false)} className="flex-1 bg-slate-100 text-slate-700 font-bold py-3.5 rounded-xl border border-slate-200">Batal</button>
+        <button onClick={handleSavePromo} className="flex-1 bg-slate-900 text-white font-bold py-3.5 rounded-xl shadow-md flex items-center justify-center gap-2"><Save size={18}/> Simpan</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="flex-1 flex flex-col relative pb-24 overflow-y-auto">
+      <div className="p-4 space-y-4">
+        {promos.map(promo => (
+          <div key={promo.dbId || promo.id} className={`bg-white p-4 rounded-2xl shadow-sm border ${promo.isActive ? 'border-green-200' : 'border-slate-200 opacity-60'} flex flex-col`}>
+            <div className="flex justify-between items-start">
+              <div className="flex items-center gap-3">
+                <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${promo.isActive ? 'bg-green-100 text-green-600' : 'bg-slate-100 text-slate-400'}`}><Tag size={24} /></div>
+                <div>
+                  <h3 className="font-black text-slate-800 tracking-wide">{promo.code}</h3>
+                  <p className="text-sm font-medium text-slate-500 mt-0.5">Potongan: {promo.type === 'percent' ? `${promo.value}%` : formatRp(promo.value)}</p>
+                </div>
+              </div>
+              <div className="flex flex-col gap-2">
+                <button onClick={() => { setCurrentPromo(promo); setIsEditing(true); }} className="p-1.5 flex items-center justify-center bg-blue-50 text-blue-600 rounded-lg"><Edit2 size={16} /></button>
+                <button onClick={() => handleDeletePromo(promo.dbId || promo.id)} className="p-1.5 flex items-center justify-center bg-red-50 text-red-600 rounded-lg"><Trash2 size={16} /></button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <button onClick={handleAddNew} className="absolute bottom-6 right-6 bg-slate-900 text-white p-4 rounded-full shadow-lg hover:bg-slate-800 transition-transform active:scale-95 flex items-center justify-center"><Plus size={28} /></button>
+    </div>
+  );
+}
